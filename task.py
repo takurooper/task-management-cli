@@ -452,6 +452,16 @@ def _generate_common_web_style() -> None:
         "api-client.js",
         "window.TaskApi={};",
     )
+    _copy_web_asset_to_views(
+        _web_style_path("task-popup"),
+        "task-popup.css",
+        "",
+    )
+    _copy_web_asset_to_views(
+        _web_script_path("task-popup"),
+        "task-popup.js",
+        "window.TaskPopup={open(){},close(){}};",
+    )
 
 
 def _generate_web_shell_view() -> None:
@@ -559,8 +569,14 @@ def _build_process_graph_model(tasks: list[dict]) -> dict:
         parent_id = t.get("parent_id")
         if parent_id not in valid_ids or parent_id == tid:
             parent_id = None
-        project_id = parent_id or tid
-        project_members.setdefault(project_id, []).append(tid)
+        if parent_id:
+            project_id = parent_id
+            project_members.setdefault(parent_id, []).append(tid)
+        elif tid in parent_ids:
+            project_id = tid
+            project_members.setdefault(tid, []).append(tid)
+        else:
+            project_id = None
 
         status = t.get("status", "TODO")
         if status not in STATUSES:
@@ -719,6 +735,99 @@ def _layout_process_graph(model: dict) -> dict:
 
         max_right = max(max_right, group_x + group_w)
         row_top += group_h + row_gap
+
+    # ── Place ungrouped nodes (no parent, not a parent) ──
+    grouped_ids: set[str] = set()
+    for g in model["groups"]:
+        grouped_ids.update(g["members"])
+    ungrouped = sorted(n_id for n_id in node_map if n_id not in grouped_ids)
+
+    if ungrouped:
+        ug_set = set(ungrouped)
+
+        # Connected components via BFS on dependency edges
+        ug_adj: dict[str, set[str]] = {tid: set() for tid in ungrouped}
+        for edge in model["edges"]:
+            if edge["from"] in ug_set and edge["to"] in ug_set:
+                ug_adj[edge["from"]].add(edge["to"])
+                ug_adj[edge["to"]].add(edge["from"])
+
+        ug_visited: set[str] = set()
+        ug_components: list[list[str]] = []
+        for tid in ungrouped:
+            if tid in ug_visited:
+                continue
+            queue = [tid]
+            ug_visited.add(tid)
+            comp: list[str] = []
+            while queue:
+                cur = queue.pop(0)
+                comp.append(cur)
+                for nb in sorted(ug_adj[cur]):
+                    if nb not in ug_visited:
+                        ug_visited.add(nb)
+                        queue.append(nb)
+            ug_components.append(comp)
+
+        chains = [c for c in ug_components if len(c) > 1]
+        singletons = sorted(
+            [c[0] for c in ug_components if len(c) == 1],
+            key=lambda tid: (node_map[tid]["status"] == "DONE", tid),
+        )
+
+        # Place dependency chains horizontally
+        for comp in chains:
+            comp_set = set(comp)
+            cols: dict[str, int] = {}
+            remaining = list(comp)
+            for _ in range(len(remaining) + 2):
+                nxt: list[str] = []
+                for tid in remaining:
+                    intra = [d for d in edges_by_to.get(tid, []) if d in comp_set]
+                    if not intra:
+                        cols[tid] = 0
+                    elif all(d in cols for d in intra):
+                        cols[tid] = max(cols[d] for d in intra) + 1
+                    else:
+                        nxt.append(tid)
+                remaining = nxt
+                if not remaining:
+                    break
+            for tid in remaining:
+                cols[tid] = 0
+
+            members_by_col: dict[int, list[str]] = {}
+            for tid in comp:
+                members_by_col.setdefault(cols[tid], []).append(tid)
+
+            max_stack = max(len(v) for v in members_by_col.values())
+            for ci in sorted(members_by_col.keys()):
+                for slot, tid in enumerate(members_by_col[ci]):
+                    node = dict(node_map[tid])
+                    node["x"] = margin_x + ci * (node_w + col_gap)
+                    node["y"] = row_top + slot * (node_h + stack_gap)
+                    node["w"] = node_w
+                    node["h"] = node_h
+                    placed_nodes.append(node)
+                    max_right = max(max_right, node["x"] + node_w)
+            comp_h = max_stack * node_h + max(0, max_stack - 1) * stack_gap
+            row_top += comp_h + row_gap
+
+        # Place singletons in a compact grid
+        if singletons:
+            grid_cols = 3
+            for i, tid in enumerate(singletons):
+                gc = i % grid_cols
+                gr = i // grid_cols
+                node = dict(node_map[tid])
+                node["x"] = margin_x + gc * (node_w + col_gap)
+                node["y"] = row_top + gr * (node_h + stack_gap)
+                node["w"] = node_w
+                node["h"] = node_h
+                placed_nodes.append(node)
+                max_right = max(max_right, node["x"] + node_w)
+            num_rows = (len(singletons) + grid_cols - 1) // grid_cols
+            row_top += num_rows * node_h + max(0, num_rows - 1) * stack_gap + row_gap
 
     canvas = {
         "x": 0,

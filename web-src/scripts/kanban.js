@@ -159,6 +159,7 @@
         card.addEventListener("dragstart", (event) => {
           draggingTaskId = t.id;
           card.classList.add("dragging");
+          card._didDrag = true;
           if (event.dataTransfer) {
             event.dataTransfer.setData("text/task-id", t.id);
             event.dataTransfer.effectAllowed = "move";
@@ -168,6 +169,19 @@
           draggingTaskId = null;
           card.classList.remove("dragging");
           document.querySelectorAll(".lane.droppable").forEach((el) => el.classList.remove("droppable"));
+        });
+        card.addEventListener("click", () => {
+          if (card._didDrag) { card._didDrag = false; return; }
+          window.TaskPopup.open(t, {
+            onUpdate(updated) { replaceTask(updated); render(); },
+            onDelete(id) {
+              for (const s of statuses) {
+                const idx = columns[s].findIndex((x) => x.id === id);
+                if (idx >= 0) { columns[s].splice(idx, 1); break; }
+              }
+              render();
+            },
+          });
         });
 
         stack.appendChild(card);

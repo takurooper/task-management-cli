@@ -41,7 +41,7 @@
   background: #fff;
   padding: 0.35rem 0.55rem;
   min-height: 44px;
-  cursor: grab;
+  cursor: pointer;
 }
 
 .task-row.dragging {

@@ -39,7 +39,7 @@
   border: 1px solid #cfd9ef;
   background: #fff;
   padding: 0.62rem;
-  cursor: grab;
+  cursor: pointer;
 }
 
 .card.dragging {

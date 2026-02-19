@@ -32,6 +32,7 @@
     },
     drag: null,
     linkDraft: null,
+    nodeClick: null,
   };
 
   svg.setAttribute("viewBox", `${state.viewBox.x} ${state.viewBox.y} ${state.viewBox.w} ${state.viewBox.h}`);
@@ -360,30 +361,69 @@
     if (!id) return;
     event.stopPropagation();
     event.preventDefault();
-    startLinkDraft(id, event.clientX, event.clientY);
+    state.nodeClick = { id, x: event.clientX, y: event.clientY, moved: false };
   }
 
   function onNodeMouseUp(event) {
-    if (!state.linkDraft) return;
-    const id = event.currentTarget?.dataset?.id;
-    if (!id) return;
-    event.stopPropagation();
-    event.preventDefault();
-    completeLink(id);
+    const click = state.nodeClick;
+    state.nodeClick = null;
+
+    if (state.linkDraft) {
+      const id = event.currentTarget?.dataset?.id;
+      if (!id) return;
+      event.stopPropagation();
+      event.preventDefault();
+      completeLink(id);
+      return;
+    }
+
+    if (click && !click.moved) {
+      const node = nodeData.get(click.id);
+      if (!node) return;
+      event.stopPropagation();
+      event.preventDefault();
+      window.TaskPopup.open(node, {
+        onUpdate(updated) {
+          Object.assign(node, updated);
+          const el = nodeEls.get(node.id);
+          if (el) {
+            el.dataset.status = updated.status || node.status;
+            el.dataset.title = String(updated.title || node.title || "").toLowerCase();
+            el.className = `node ${STATUS_CLASS[updated.status || node.status] || "todo"}`;
+          }
+          applyFilters();
+        },
+        onDelete(id) {
+          const el = nodeEls.get(id);
+          if (el) { el.remove(); nodeEls.delete(id); }
+          nodeData.delete(id);
+          renderEdges();
+          applyFilters();
+        },
+      });
+    }
   }
 
   svg.addEventListener("wheel", (event) => {
     event.preventDefault();
-    const factor = event.deltaY > 0 ? 1.08 : 0.92;
-    const pointer = screenToSvg(event.clientX, event.clientY);
-    const newW = Math.max(200, Math.min(12000, state.viewBox.w * factor));
-    const newH = Math.max(160, Math.min(9000, state.viewBox.h * factor));
-    const dx = (pointer.x - state.viewBox.x) / state.viewBox.w;
-    const dy = (pointer.y - state.viewBox.y) / state.viewBox.h;
-    state.viewBox.x = pointer.x - newW * dx;
-    state.viewBox.y = pointer.y - newH * dy;
-    state.viewBox.w = newW;
-    state.viewBox.h = newH;
+    if (event.ctrlKey) {
+      // Pinch gesture → zoom
+      const factor = event.deltaY > 0 ? 1.08 : 0.92;
+      const pointer = screenToSvg(event.clientX, event.clientY);
+      const newW = Math.max(200, Math.min(12000, state.viewBox.w * factor));
+      const newH = Math.max(160, Math.min(9000, state.viewBox.h * factor));
+      const dx = (pointer.x - state.viewBox.x) / state.viewBox.w;
+      const dy = (pointer.y - state.viewBox.y) / state.viewBox.h;
+      state.viewBox.x = pointer.x - newW * dx;
+      state.viewBox.y = pointer.y - newH * dy;
+      state.viewBox.w = newW;
+      state.viewBox.h = newH;
+    } else {
+      // Two-finger scroll → pan
+      const rect = svg.getBoundingClientRect();
+      state.viewBox.x += (event.deltaX / rect.width) * state.viewBox.w;
+      state.viewBox.y += (event.deltaY / rect.height) * state.viewBox.h;
+    }
     syncViewBox();
   }, { passive: false });
 
@@ -393,6 +433,14 @@
   });
 
   window.addEventListener("mousemove", (event) => {
+    if (state.nodeClick && !state.nodeClick.moved) {
+      const dx = event.clientX - state.nodeClick.x;
+      const dy = event.clientY - state.nodeClick.y;
+      if (dx * dx + dy * dy > 25) {
+        state.nodeClick.moved = true;
+        startLinkDraft(state.nodeClick.id, state.nodeClick.x, state.nodeClick.y);
+      }
+    }
     if (state.linkDraft) {
       updateLinkDraft(event.clientX, event.clientY);
       return;

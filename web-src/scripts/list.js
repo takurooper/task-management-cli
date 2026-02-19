@@ -87,6 +87,7 @@
         row.addEventListener("dragstart", (event) => {
           draggingTaskId = t.id;
           row.classList.add("dragging");
+          row._didDrag = true;
           if (event.dataTransfer) {
             event.dataTransfer.setData("text/task-id", t.id);
             event.dataTransfer.effectAllowed = "move";
@@ -96,6 +97,13 @@
           draggingTaskId = null;
           row.classList.remove("dragging");
           document.querySelectorAll(".status-section.droppable").forEach((el) => el.classList.remove("droppable"));
+        });
+        row.addEventListener("click", () => {
+          if (row._didDrag) { row._didDrag = false; return; }
+          window.TaskPopup.open(t, {
+            onUpdate(updated) { Object.assign(t, updated); render(); },
+            onDelete() { const idx = tasks.indexOf(t); if (idx >= 0) tasks.splice(idx, 1); taskMap.delete(t.id); render(); },
+          });
         });
         list.appendChild(row);
       }
