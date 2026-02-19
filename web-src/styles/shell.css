@@ -1,0 +1,62 @@
+.app-shell {
+  grid-template-rows: auto auto 1fr;
+}
+
+.switcher-controls {
+  gap: 0.6rem;
+}
+
+.switcher-controls button {
+  border: 1px solid #96a8d6;
+  background: linear-gradient(180deg, #ffffff, #f2f6ff);
+  color: #21386f;
+  border-radius: 999px;
+  padding: 0.44rem 0.95rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.switcher-controls button.active {
+  background: linear-gradient(180deg, #e9f1ff, #dce9ff);
+  border-color: #587fcb;
+  color: #12366d;
+}
+
+.open-link {
+  margin-left: auto;
+  color: #2f4f94;
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.open-link:hover {
+  text-decoration: underline;
+}
+
+.frame-wrap {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: #ffffffd9;
+  box-shadow: 0 16px 42px rgba(18, 35, 69, 0.12);
+  min-height: min(84vh, 980px);
+}
+
+#viewFrame {
+  width: 100%;
+  height: min(84vh, 980px);
+  border: 0;
+  background: transparent;
+}
+
+@media (max-width: 900px) {
+  .open-link {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  #viewFrame {
+    height: min(78vh, 760px);
+  }
+}

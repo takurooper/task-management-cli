@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Build-only entrypoint for process.css.
+  Main styles live in web-src/process.css and can be merged or replaced over time.
+*/

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Task Process View</title>
+  <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./process.css" />
+</head>
+<body>
+  <main id="app" class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Task Management CLI</p>
+        <h1 class="title">Process View</h1>
+      </div>
+      <div class="meta" id="meta"></div>
+    </header>
+
+    <section class="controls" aria-label="Controls">
+      <label class="field search">
+        <span>Search</span>
+        <input id="searchInput" type="search" placeholder="task id / title" />
+      </label>
+      <fieldset class="status-filters">
+        <legend>Status</legend>
+        <label><input type="checkbox" value="TODO" checked />TODO</label>
+        <label><input type="checkbox" value="IN_PROGRESS" checked />IN_PROGRESS</label>
+        <label><input type="checkbox" value="PENDING" checked />PENDING</label>
+        <label><input type="checkbox" value="DONE" checked />DONE</label>
+      </fieldset>
+      <div class="actions">
+        <button id="fitButton" type="button">Fit</button>
+        <button id="fullscreenButton" type="button">Fullscreen</button>
+      </div>
+    </section>
+    <section id="notice" class="notice" aria-live="polite"></section>
+
+    <section class="canvas-wrap">
+      <svg id="graphSvg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Task process graph"></svg>
+    </section>
+
+    <footer class="legend" aria-label="Legend">
+      <span class="chip chip-todo">TODO</span>
+      <span class="chip chip-inprogress">IN_PROGRESS</span>
+      <span class="chip chip-pending">PENDING</span>
+      <span class="chip chip-done">DONE</span>
+    </footer>
+  </main>
+
+  <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./api-client.js"></script>
+  <script src="./process.js"></script>
+</body>
+</html>

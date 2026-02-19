@@ -1,0 +1,75 @@
+.canvas-wrap, .legend {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #ffffffd9;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 16px 42px rgba(18, 35, 69, 0.12);
+}
+
+.actions { margin-left: auto; }
+button {
+  border: 1px solid #96a8d6;
+  background: linear-gradient(180deg, #ffffff, #f2f6ff);
+  color: #21386f;
+  border-radius: 999px;
+  padding: 0.44rem 0.95rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.notice {
+  min-height: 1.4rem;
+  font-size: 0.86rem;
+  color: #2d436e;
+}
+
+.notice[data-kind="warn"] { color: #8a5a00; }
+.notice[data-kind="error"] { color: #8f1f2a; }
+
+.canvas-wrap { overflow: hidden; min-height: min(72vh, 900px); }
+#graphSvg { width: 100%; height: min(72vh, 900px); display: block; cursor: grab; }
+#graphSvg:active { cursor: grabbing; }
+
+.legend { padding: 0.8rem 1rem; display: flex; gap: 0.55rem; flex-wrap: wrap; }
+.chip { border-radius: 999px; padding: 0.22rem 0.62rem; border: 1px solid transparent; font-size: 0.75rem; font-weight: 700; }
+.chip-todo { background: var(--todo-bg); border-color: var(--todo-stroke); }
+.chip-inprogress { background: var(--progress-bg); border-color: var(--progress-stroke); }
+.chip-pending { background: var(--pending-bg); border-color: var(--pending-stroke); }
+.chip-done { background: var(--done-bg); border-color: var(--done-stroke); }
+
+.group-box { fill: #f7fbff; stroke: #c8d6f0; stroke-width: 1.5; stroke-dasharray: 7 4; }
+.group-label { fill: #31466b; font-size: 13px; font-weight: 700; }
+.group.inprogress .group-box { fill: #fffbf4; stroke: #e2bb84; }
+.group.pending .group-box { fill: #fbf7ff; stroke: #c7afe8; }
+.group.done .group-box { fill: #f3fcf4; stroke: #9dd0ab; }
+
+.edge { fill: none; stroke: #97a8c7; stroke-width: 2.2; opacity: 0.95; }
+.edge-arrow { fill: #6f87b6; }
+.link-draft { fill: none; stroke: #4f7ad2; stroke-width: 2.2; stroke-dasharray: 6 4; opacity: 0.9; }
+.node-card { stroke-width: 2; filter: drop-shadow(0 5px 12px rgba(33, 58, 104, 0.12)); }
+.node-id { font-size: 12px; font-weight: 800; fill: #263a63; }
+.node-title { font-size: 12px; font-weight: 700; fill: #1e2639; }
+.node-status { font-size: 11px; fill: #384861; }
+.node.todo .node-card { fill: var(--todo-bg); stroke: var(--todo-stroke); }
+.node.inprogress .node-card { fill: var(--progress-bg); stroke: var(--progress-stroke); }
+.node.pending .node-card { fill: var(--pending-bg); stroke: var(--pending-stroke); }
+.node.done .node-card { fill: var(--done-bg); stroke: var(--done-stroke); }
+.node.connect-source .node-card { stroke: #3a63b0; stroke-width: 3; }
+
+.canvas-wrap:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+  background: #f8fbff;
+}
+
+.canvas-wrap:fullscreen #graphSvg {
+  width: 100vw;
+  height: 100vh;
+}
+
+@media (max-width: 900px) {
+  .actions { margin-left: 0; }
+  #graphSvg { height: min(66vh, 560px); }
+}

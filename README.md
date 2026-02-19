@@ -67,7 +67,8 @@ python task.py archive   # 完了タスクを archive.json に移動
 ### ビュー生成
 
 ```bash
-python task.py view   # views/list.md / views/kanban.md / views/process.md を生成
+python task.py view   # views/*.md + views/list.html + views/kanban.html + views/process.html を生成
+python task.py serve  # views/ を http://127.0.0.1:8765 で配信（index.html で切替）
 ```
 
 - `views/list.md` — チェックボックス付きリスト（親子構造付き）
@@ -76,6 +77,44 @@ python task.py view   # views/list.md / views/kanban.md / views/process.md を�
   - DONE: 完了日ごとにグルーピング
 - `views/kanban.md` — Mermaid kanban ダイアグラム
 - `views/process.md` — 依存関係を矢印で示すMermaid プロセス図
+- `views/list.html` — 静的Webリストビュー（検索 / ステータスフィルタ）
+- `views/kanban.html` — 静的Webカンバンビュー（検索）
+- `views/process.html` — 軽量SVG描画の静的Webプロセスビュー（`process.css`, `process.js` を同時生成）
+- `views/index.html` — List / Kanban / Process の切替シェル
+
+### ローカルWebサーバー
+
+DevTools での調整用に、`views/` 配下をローカル配信できます。
+
+```bash
+python task.py serve
+# オプション:
+python task.py serve --host 0.0.0.0 --port 8765
+python task.py serve --no-build   # 既存生成物をそのまま配信
+```
+
+- 既定URL: `http://127.0.0.1:8765/`
+- 切替UI: `index.html`（List / Kanban / Process ボタン）
+- API: 同一サーバーで `/api/*` を提供（Kanban の D&D 状態更新で利用）
+
+主なAPI:
+
+```text
+GET    /api/tasks
+POST   /api/tasks
+PATCH  /api/tasks/:id
+DELETE /api/tasks/:id
+POST   /api/links/dependency
+POST   /api/links/parent
+POST   /api/archive
+POST   /api/view/regenerate
+```
+
+### 初期化
+
+```bash
+python task.py init   # tasks.json / archive.json / config.json を初期化し、ビューを再生成
+```
 
 ### GitHub Projects 同期
 
@@ -97,6 +136,10 @@ python task.py sync --status   # 同期状態の確認
 | `views/list.md` | リストビュー（自動生成） |
 | `views/kanban.md` | カンバンビュー（自動生成） |
 | `views/process.md` | プロセスビュー（自動生成） |
+| `views/list.html` | 静的Webリストビュー（自動生成） |
+| `views/kanban.html` | 静的Webカンバンビュー（自動生成） |
+| `views/process.html` | 静的Webプロセスビュー（自動生成） |
+| `views/index.html` | Webビュー切替シェル（自動生成） |
 
 ## AI Agent との連携
 
@@ -120,3 +163,27 @@ python task.py sync --status   # 同期状態の確認
 ```
 
 `sync_tag` に指定されたタグを持つタスクのみがGitHub Projectsと同期されます。
+
+## Process Web View Styling (optional)
+
+`task.py view` は `web-src/` をソースとして `views/common.css` / `views/list.css` / `views/kanban.css` / `views/process.css` と各 `*.js` を生成します。
+
+ディレクトリ構成:
+
+```text
+web-src/
+  templates/  # *.template.html
+  scripts/    # *.js
+  styles/     # *.css
+  dist/styles/# ビルド済みCSS（任意、存在時に優先）
+```
+
+`views/process.css` は `web-src/dist/styles/process.css`（存在しない場合は `web-src/styles/process.css`）から出力されます。
+
+Tailwind をビルド時だけ使って CSS を更新する場合:
+
+```bash
+npm install
+npm run build:process-css
+python task.py view
+```

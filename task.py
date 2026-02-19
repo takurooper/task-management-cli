@@ -8,10 +8,11 @@ GitHub Projects sync via gh CLI.
 """
 
 import argparse
+import http.server
 import json
-import os
 import subprocess
 import sys
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,13 @@ TASKS_FILE = BASE_DIR / "tasks.json"
 ARCHIVE_FILE = BASE_DIR / "archive.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 VIEWS_DIR = BASE_DIR / "views"
+WEB_SRC_DIR = BASE_DIR / "web-src"
+WEB_TEMPLATES_DIR = WEB_SRC_DIR / "templates"
+WEB_SCRIPTS_DIR = WEB_SRC_DIR / "scripts"
+WEB_STYLES_DIR = WEB_SRC_DIR / "styles"
+WEB_STYLES_DIST_DIR = WEB_SRC_DIR / "dist" / "styles"
+WEB_SHELL_TEMPLATE = WEB_TEMPLATES_DIR / "shell.template.html"
+WEB_API_CLIENT_SCRIPT = WEB_SCRIPTS_DIR / "api-client.js"
 
 STATUSES = ("TODO", "IN_PROGRESS", "PENDING", "DONE")
 
@@ -113,11 +121,21 @@ def _new_task(data: dict, title: str, **kwargs) -> dict:
 # ---------------------------------------------------------------------------
 def _generate_views(data: dict) -> None:
     VIEWS_DIR.mkdir(parents=True, exist_ok=True)
-    active = [t for t in data["tasks"] if t["status"] != "DONE"]
     all_tasks = data["tasks"]
-    _generate_list_view(all_tasks)
-    _generate_kanban_view(all_tasks)
+    tasks_for_list_kanban = _exclude_parent_tasks(all_tasks)
+    _generate_list_view(tasks_for_list_kanban)
+    _generate_kanban_view(tasks_for_list_kanban)
     _generate_process_view(all_tasks)
+    _generate_common_web_style()
+    _generate_list_web_view(tasks_for_list_kanban)
+    _generate_kanban_web_view(tasks_for_list_kanban)
+    _generate_process_web_view(all_tasks)
+    _generate_web_shell_view()
+
+
+def _exclude_parent_tasks(tasks: list[dict]) -> list[dict]:
+    parent_ids = {t.get("parent_id") for t in tasks if t.get("parent_id")}
+    return [t for t in tasks if t["id"] not in parent_ids]
 
 
 def _task_line(t: dict, indent: int = 0) -> str:
@@ -136,70 +154,49 @@ def _task_line(t: dict, indent: int = 0) -> str:
 
 
 def _generate_list_view(active: list) -> None:
-    # Build parent-child map
-    children_map: dict[str | None, list] = {}
-    for t in active:
-        pid = t.get("parent_id")
-        children_map.setdefault(pid, []).append(t)
-
     lines = ["# タスク一覧\n"]
     for status in ("TODO", "IN_PROGRESS", "PENDING", "DONE"):
-        top_tasks = [t for t in children_map.get(None, []) if t["status"] == status]
-        if not top_tasks and not any(
-            t["status"] == status for t in active if t.get("parent_id")
-        ):
+        tasks = [t for t in active if t["status"] == status]
+        if not tasks:
             continue
         lines.append(f"\n## {status}\n")
         if status == "DONE":
             # Group by completed_date
             from itertools import groupby
-            sorted_tasks = sorted(top_tasks, key=lambda t: t.get("completed_date") or "", reverse=True)
+            sorted_tasks = sorted(tasks, key=lambda t: t.get("completed_date") or "", reverse=True)
             for date, group in groupby(sorted_tasks, key=lambda t: t.get("completed_date") or "不明"):
                 lines.append(f"\n### 完了日（{date}）\n")
                 for t in group:
                     lines.append(_task_line(t, 0))
-                    for c in children_map.get(t["id"], []):
-                        lines.append(_task_line(c, 1))
         elif status == "IN_PROGRESS":
             from itertools import groupby
-            scheduled = [t for t in top_tasks if t.get("scheduled_date")]
-            unscheduled = [t for t in top_tasks if not t.get("scheduled_date")]
+            scheduled = [t for t in tasks if t.get("scheduled_date")]
+            unscheduled = [t for t in tasks if not t.get("scheduled_date")]
             sorted_scheduled = sorted(scheduled, key=lambda t: t["scheduled_date"])
             for date, group in groupby(sorted_scheduled, key=lambda t: t["scheduled_date"]):
                 lines.append(f"\n### 予定作業日（{date}）\n")
                 for t in group:
                     lines.append(_task_line(t, 0))
-                    for c in children_map.get(t["id"], []):
-                        lines.append(_task_line(c, 1))
             for t in unscheduled:
                 if t == unscheduled[0]:
                     lines.append(f"\n### 予定作業日未定\n")
                 lines.append(_task_line(t, 0))
-                for c in children_map.get(t["id"], []):
-                    lines.append(_task_line(c, 1))
         elif status == "TODO":
             from itertools import groupby
-            with_due = [t for t in top_tasks if t.get("due_date")]
-            without_due = [t for t in top_tasks if not t.get("due_date")]
+            with_due = [t for t in tasks if t.get("due_date")]
+            without_due = [t for t in tasks if not t.get("due_date")]
             sorted_due = sorted(with_due, key=lambda t: t["due_date"])
             for date, group in groupby(sorted_due, key=lambda t: t["due_date"]):
                 lines.append(f"\n### 期限（{date}）\n")
                 for t in group:
                     lines.append(_task_line(t, 0))
-                    for c in children_map.get(t["id"], []):
-                        lines.append(_task_line(c, 1))
             for t in without_due:
                 if t == without_due[0]:
                     lines.append(f"\n### 期限未定\n")
                 lines.append(_task_line(t, 0))
-                for c in children_map.get(t["id"], []):
-                    lines.append(_task_line(c, 1))
         else:
-            for t in top_tasks:
+            for t in tasks:
                 lines.append(_task_line(t, 0))
-                # children
-                for c in children_map.get(t["id"], []):
-                    lines.append(_task_line(c, 1))
 
     lines.append(f"\n---\n*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n")
     (VIEWS_DIR / "list.md").write_text("\n".join(lines), encoding="utf-8")
@@ -396,6 +393,421 @@ def _generate_process_view(active: list) -> None:
     lines.append("```")
     lines.append(f"\n---\n*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n")
     (VIEWS_DIR / "process.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _read_text_or_default(path: Path, default: str) -> str:
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return default
+
+
+def _web_template_path(view_name: str) -> Path:
+    return WEB_TEMPLATES_DIR / f"{view_name}.template.html"
+
+
+def _web_script_path(view_name: str) -> Path:
+    return WEB_SCRIPTS_DIR / f"{view_name}.js"
+
+
+def _web_style_path(view_name: str) -> Path:
+    dist = WEB_STYLES_DIST_DIR / f"{view_name}.css"
+    if dist.exists():
+        return dist
+    return WEB_STYLES_DIR / f"{view_name}.css"
+
+
+def _copy_web_asset_to_views(src: Path, target_name: str, default_content: str) -> None:
+    content = _read_text_or_default(src, default_content)
+    (VIEWS_DIR / target_name).write_text(content, encoding="utf-8")
+
+
+def _render_web_view(view_name: str, payload: dict, default_template: str) -> None:
+    template = _read_text_or_default(_web_template_path(view_name), default_template)
+    html_content = template.replace(
+        "__WEB_VIEW_DATA_JSON__",
+        json.dumps(payload, ensure_ascii=False),
+    )
+    (VIEWS_DIR / f"{view_name}.html").write_text(html_content, encoding="utf-8")
+
+    _copy_web_asset_to_views(
+        _web_script_path(view_name),
+        f"{view_name}.js",
+        "(() => { console.log('missing script asset'); })();\n",
+    )
+    _copy_web_asset_to_views(
+        _web_style_path(view_name),
+        f"{view_name}.css",
+        "body{font-family:sans-serif;margin:1rem;}",
+    )
+
+
+def _generate_common_web_style() -> None:
+    _copy_web_asset_to_views(
+        _web_style_path("common"),
+        "common.css",
+        ":root{color-scheme:light;}*{box-sizing:border-box;}",
+    )
+    _copy_web_asset_to_views(
+        WEB_API_CLIENT_SCRIPT,
+        "api-client.js",
+        "window.TaskApi={};",
+    )
+
+
+def _generate_web_shell_view() -> None:
+    default_template = """<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Task Views</title>
+  <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./shell.css" />
+</head>
+<body>
+  <main class="shell app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Task Management CLI</p>
+        <h1 class="title">View Switcher</h1>
+      </div>
+      <div class="meta">list / kanban / process</div>
+    </header>
+    <section class="controls switcher-controls">
+      <button type="button" data-view="list">List</button>
+      <button type="button" data-view="kanban">Kanban</button>
+      <button type="button" data-view="process">Process</button>
+    </section>
+    <section class="frame-wrap">
+      <iframe id="viewFrame" title="Task view frame" loading="eager"></iframe>
+    </section>
+  </main>
+  <script src="./shell.js"></script>
+</body>
+</html>
+"""
+    template = _read_text_or_default(WEB_SHELL_TEMPLATE, default_template)
+    (VIEWS_DIR / "index.html").write_text(template, encoding="utf-8")
+    _copy_web_asset_to_views(
+        _web_script_path("shell"),
+        "shell.js",
+        "(() => { console.log('missing shell script'); })();\n",
+    )
+    _copy_web_asset_to_views(
+        _web_style_path("shell"),
+        "shell.css",
+        ".frame-wrap{height:80vh}.frame-wrap iframe{width:100%;height:100%;border:0}",
+    )
+
+
+def _task_summary(task: dict) -> dict:
+    return {
+        "id": task["id"],
+        "title": task.get("title", ""),
+        "status": task.get("status", "TODO"),
+        "tags": task.get("tags", []),
+        "due_date": task.get("due_date"),
+        "scheduled_date": task.get("scheduled_date"),
+        "completed_date": task.get("completed_date"),
+        "updated_at": task.get("updated_at"),
+        "parent_id": task.get("parent_id"),
+        "dependencies": task.get("dependencies", []),
+        "github_issue_number": task.get("github_issue_number"),
+    }
+
+
+def _build_list_web_payload(tasks: list[dict]) -> dict:
+    sorted_tasks = sorted(tasks, key=lambda t: t["id"])
+    return {
+        "tasks": [_task_summary(t) for t in sorted_tasks],
+        "meta": {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "task_count": len(sorted_tasks),
+        },
+    }
+
+
+def _build_kanban_web_payload(tasks: list[dict]) -> dict:
+    sorted_tasks = sorted(tasks, key=lambda t: t["id"])
+    by_status = {s: [] for s in STATUSES}
+    for t in sorted_tasks:
+        status = t.get("status", "TODO")
+        if status not in by_status:
+            status = "TODO"
+        by_status[status].append(_task_summary(t))
+    return {
+        "columns": by_status,
+        "meta": {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "task_count": len(sorted_tasks),
+        },
+    }
+
+
+def _build_process_graph_model(tasks: list[dict]) -> dict:
+    sorted_tasks = sorted(tasks, key=lambda t: t["id"])
+    task_map = {t["id"]: t for t in sorted_tasks}
+    valid_ids = set(task_map.keys())
+    parent_ids = {t.get("parent_id") for t in sorted_tasks if t.get("parent_id")}
+
+    nodes = []
+    edges = []
+    project_members: dict[str, list[str]] = {}
+
+    for tid in sorted(valid_ids):
+        t = task_map[tid]
+        parent_id = t.get("parent_id")
+        if parent_id not in valid_ids or parent_id == tid:
+            parent_id = None
+        project_id = parent_id or tid
+        project_members.setdefault(project_id, []).append(tid)
+
+        status = t.get("status", "TODO")
+        if status not in STATUSES:
+            status = "TODO"
+
+        deps = []
+        seen = set()
+        for dep in t.get("dependencies", []):
+            if dep in valid_ids and dep != tid and dep not in seen:
+                deps.append(dep)
+                seen.add(dep)
+                edges.append({"from": dep, "to": tid, "type": "dependency"})
+
+        nodes.append(
+            {
+                "id": tid,
+                "title": t.get("title", ""),
+                "status": status,
+                "updated_at": t.get("updated_at"),
+                "parent_id": parent_id,
+                "project_id": project_id,
+                "is_parent": tid in parent_ids,
+                "dependencies": deps,
+                "tags": t.get("tags", []),
+            }
+        )
+
+    groups = []
+    for pid in sorted(project_members.keys()):
+        groups.append(
+            {
+                "id": pid,
+                "title": task_map[pid].get("title", ""),
+                "status": task_map[pid].get("status", "TODO"),
+                "members": sorted(project_members[pid]),
+            }
+        )
+
+    return {"nodes": nodes, "edges": edges, "groups": groups}
+
+
+def _layout_process_graph(model: dict) -> dict:
+    # Project-row layout:
+    # - one horizontal row per project (parent task)
+    # - projects are stacked vertically and never overlap
+    # - tasks inside each row expand to the right based on dependencies
+    node_w = 280
+    node_h = 116
+    col_gap = 44
+    stack_gap = 20
+    row_gap = 36
+    margin_x = 56
+    margin_y = 72
+    label_col_w = 220
+    row_header_h = 34
+    row_pad_x = 18
+    row_pad_y = 16
+
+    node_map = {n["id"]: n for n in model["nodes"]}
+    edges_by_to: dict[str, list[str]] = {}
+    for edge in model["edges"]:
+        edges_by_to.setdefault(edge["to"], []).append(edge["from"])
+
+    placed_nodes: list[dict] = []
+    placed_groups: list[dict] = []
+    max_right = margin_x
+    row_top = margin_y
+
+    for group in sorted(model["groups"], key=lambda g: g["id"]):
+        members = [m for m in sorted(group["members"]) if m in node_map]
+        if not members:
+            continue
+
+        root_id = group["id"]
+        render_members = [m for m in members if not node_map[m].get("is_parent")]
+        cols: dict[str, int] = {}
+        if root_id in render_members:
+            cols[root_id] = 0
+        unresolved = [m for m in render_members if m != root_id]
+        unresolved.sort()
+
+        # Assign column from intra-project dependencies, fallback to col 1.
+        for _ in range(len(unresolved) + 2):
+            if not unresolved:
+                break
+            next_unresolved = []
+            progressed = False
+            for tid in unresolved:
+                intra_deps = [d for d in edges_by_to.get(tid, []) if d in render_members]
+                if not intra_deps:
+                    cols[tid] = 0
+                    progressed = True
+                    continue
+                if all(dep in cols for dep in intra_deps):
+                    cols[tid] = max(cols[dep] for dep in intra_deps) + 1
+                    progressed = True
+                else:
+                    next_unresolved.append(tid)
+            unresolved = next_unresolved
+            if not progressed:
+                break
+
+        # Cycle or unresolved dependencies fallback.
+        for tid in unresolved:
+            intra_deps = [d for d in edges_by_to.get(tid, []) if d in cols]
+            cols[tid] = (max(cols[d] for d in intra_deps) + 1) if intra_deps else 0
+
+        members_by_col: dict[int, list[str]] = {}
+        for mid in render_members:
+            members_by_col.setdefault(cols.get(mid, 0), []).append(mid)
+        for col in members_by_col:
+            members_by_col[col].sort(key=lambda tid: (tid != root_id, tid))
+
+        max_col = max(members_by_col.keys()) if members_by_col else -1
+        col_heights = {col: len(ids) for col, ids in members_by_col.items()}
+        max_stack = max(col_heights.values()) if col_heights else 0
+
+        group_x = margin_x
+        group_y = row_top
+        group_w = (
+            label_col_w
+            + row_pad_x * 2
+            + max(0, (max_col + 1) * node_w)
+            + max(0, max_col * col_gap)
+        )
+        group_h = (
+            row_header_h
+            + row_pad_y * 2
+            + max(0, max_stack * node_h)
+            + max(0, (max_stack - 1) * stack_gap)
+        )
+
+        node_base_x = group_x + label_col_w + row_pad_x
+        node_base_y = group_y + row_header_h + row_pad_y
+        for col in sorted(members_by_col.keys()):
+            for slot, tid in enumerate(members_by_col[col]):
+                node = dict(node_map[tid])
+                node["x"] = node_base_x + col * (node_w + col_gap)
+                node["y"] = node_base_y + slot * (node_h + stack_gap)
+                node["w"] = node_w
+                node["h"] = node_h
+                placed_nodes.append(node)
+
+        placed_groups.append(
+            {
+                "id": group["id"],
+                "title": group["title"],
+                "status": group["status"],
+                "x": group_x,
+                "y": group_y,
+                "w": group_w,
+                "h": group_h,
+                "members": members,
+            }
+        )
+
+        max_right = max(max_right, group_x + group_w)
+        row_top += group_h + row_gap
+
+    canvas = {
+        "x": 0,
+        "y": 0,
+        "width": max_right + margin_x,
+        "height": row_top + margin_y,
+    }
+    return {"nodes": placed_nodes, "groups": placed_groups, "canvas": canvas}
+
+
+def _build_process_web_payload(tasks: list[dict]) -> dict:
+    model = _build_process_graph_model(tasks)
+    layout = _layout_process_graph(model)
+    return {
+        "nodes": layout["nodes"],
+        "edges": model["edges"],
+        "groups": layout["groups"],
+        "canvas": layout["canvas"],
+        "meta": {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "node_count": len(layout["nodes"]),
+            "edge_count": len(model["edges"]),
+            "group_count": len(layout["groups"]),
+            "layout_mode": "project_rows",
+        },
+    }
+
+
+def _generate_process_web_view(tasks: list[dict]) -> None:
+    payload = _build_process_web_payload(tasks)
+    default_template = """<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Task Process View</title>
+  <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./process.css" />
+</head>
+<body>
+  <main id="app"></main>
+  <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./process.js"></script>
+</body>
+</html>
+"""
+    _render_web_view("process", payload, default_template)
+
+
+def _generate_list_web_view(tasks: list[dict]) -> None:
+    payload = _build_list_web_payload(tasks)
+    default_template = """<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Task List View</title>
+  <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./list.css" />
+</head>
+<body>
+  <main id="app"></main>
+  <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./list.js"></script>
+</body>
+</html>
+"""
+    _render_web_view("list", payload, default_template)
+
+
+def _generate_kanban_web_view(tasks: list[dict]) -> None:
+    payload = _build_kanban_web_payload(tasks)
+    default_template = """<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Task Kanban View</title>
+  <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./kanban.css" />
+</head>
+<body>
+  <main id="app"></main>
+  <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./kanban.js"></script>
+</body>
+</html>
+"""
+    _render_web_view("kanban", payload, default_template)
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +1035,308 @@ def cmd_view(args) -> None:
     data = _load_tasks()
     _generate_views(data)
     print(f"Views generated in {VIEWS_DIR}")
+
+
+def _apply_status(task: dict, new_status: str) -> None:
+    status = new_status.upper()
+    if status not in STATUSES:
+        raise ValueError(f"Invalid status: {new_status}")
+    prev = task.get("status")
+    task["status"] = status
+    if status == "DONE":
+        task["completed_date"] = _now()[:10]
+    elif prev == "DONE":
+        task["completed_date"] = None
+    task["updated_at"] = _now()
+
+
+def _check_expected_updated_at(task: dict, expected: str | None) -> tuple[bool, dict | None]:
+    if not expected:
+        return False, {"code": "invalid_request", "message": "expected_updated_at is required"}
+    if task.get("updated_at") != expected:
+        return False, {"code": "conflict", "message": "task was updated by another operation", "latest": _task_summary(task)}
+    return True, None
+
+
+def _find_task_or_none(data: dict, task_id: str) -> dict | None:
+    for t in data.get("tasks", []):
+        if t.get("id") == task_id:
+            return t
+    return None
+
+
+def _tasks_payload(data: dict) -> dict:
+    tasks = sorted(data.get("tasks", []), key=lambda t: t["id"])
+    return {
+        "tasks": [_task_summary(t) for t in tasks],
+        "meta": {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "count": len(tasks),
+        },
+    }
+
+
+def _build_task_http_handler():
+    class TaskHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(VIEWS_DIR), **kwargs)
+
+        def _send_json(self, status: int, payload: dict) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _read_json(self) -> dict:
+            raw_len = self.headers.get("Content-Length")
+            if not raw_len:
+                return {}
+            length = int(raw_len)
+            raw = self.rfile.read(length)
+            if not raw:
+                return {}
+            return json.loads(raw.decode("utf-8"))
+
+        def _path_parts(self) -> list[str]:
+            parsed = urlparse(self.path)
+            return [p for p in parsed.path.split("/") if p]
+
+        def do_GET(self):
+            parts = self._path_parts()
+            if parts[:2] == ["api", "tasks"] and len(parts) == 2:
+                data = _load_tasks()
+                self._send_json(200, _tasks_payload(data))
+                return
+            super().do_GET()
+
+        def do_POST(self):
+            parts = self._path_parts()
+            if not parts or parts[0] != "api":
+                self._send_json(404, {"code": "not_found"})
+                return
+            try:
+                body = self._read_json()
+            except Exception:
+                self._send_json(400, {"code": "invalid_json", "message": "request body is not valid json"})
+                return
+
+            if parts == ["api", "tasks"]:
+                title = str(body.get("title", "")).strip()
+                if not title:
+                    self._send_json(400, {"code": "invalid_request", "message": "title is required"})
+                    return
+                data = _load_tasks()
+                task = _new_task(
+                    data,
+                    title,
+                    description=body.get("description", "") or "",
+                    tags=body.get("tags") if isinstance(body.get("tags"), list) else [],
+                    due_date=body.get("due_date"),
+                    scheduled_date=body.get("scheduled_date"),
+                    parent_id=body.get("parent_id"),
+                    dependencies=body.get("dependencies") if isinstance(body.get("dependencies"), list) else [],
+                )
+                _save_tasks(data)
+                _generate_views(data)
+                self._send_json(201, {"task": _task_summary(task), "views_regenerated": True})
+                return
+
+            if parts == ["api", "links", "dependency"]:
+                op = body.get("op")
+                from_id = body.get("from_id")
+                to_id = body.get("to_id")
+                expected = body.get("expected_updated_at")
+                if op not in ("add", "remove") or not from_id or not to_id:
+                    self._send_json(400, {"code": "invalid_request", "message": "op/from_id/to_id are required"})
+                    return
+                data = _load_tasks()
+                from_t = _find_task_or_none(data, str(from_id))
+                to_t = _find_task_or_none(data, str(to_id))
+                if not from_t or not to_t:
+                    self._send_json(404, {"code": "not_found", "message": "task not found"})
+                    return
+                ok, err = _check_expected_updated_at(to_t, expected)
+                if not ok:
+                    self._send_json(409 if err and err.get("code") == "conflict" else 400, err or {})
+                    return
+                deps = to_t.setdefault("dependencies", [])
+                if op == "add" and from_t["id"] != to_t["id"] and from_t["id"] not in deps:
+                    deps.append(from_t["id"])
+                if op == "remove" and from_t["id"] in deps:
+                    deps.remove(from_t["id"])
+                to_t["updated_at"] = _now()
+                _save_tasks(data)
+                _generate_views(data)
+                self._send_json(200, {"task": _task_summary(to_t), "views_regenerated": True})
+                return
+
+            if parts == ["api", "links", "parent"]:
+                op = body.get("op")
+                parent_id = body.get("parent_id")
+                child_id = body.get("child_id")
+                expected = body.get("expected_updated_at")
+                if op not in ("add", "remove") or not child_id:
+                    self._send_json(400, {"code": "invalid_request", "message": "op/child_id are required"})
+                    return
+                data = _load_tasks()
+                child = _find_task_or_none(data, str(child_id))
+                parent = _find_task_or_none(data, str(parent_id)) if parent_id else None
+                if not child:
+                    self._send_json(404, {"code": "not_found", "message": "child task not found"})
+                    return
+                if op == "add" and not parent:
+                    self._send_json(404, {"code": "not_found", "message": "parent task not found"})
+                    return
+                ok, err = _check_expected_updated_at(child, expected)
+                if not ok:
+                    self._send_json(409 if err and err.get("code") == "conflict" else 400, err or {})
+                    return
+                if op == "add":
+                    child["parent_id"] = parent["id"]
+                else:
+                    child["parent_id"] = None
+                child["updated_at"] = _now()
+                _save_tasks(data)
+                _generate_views(data)
+                self._send_json(200, {"task": _task_summary(child), "views_regenerated": True})
+                return
+
+            if parts == ["api", "archive"]:
+                data = _load_tasks()
+                arch = _load_archive()
+                done = [t for t in data["tasks"] if t["status"] == "DONE"]
+                for t in done:
+                    data["tasks"].remove(t)
+                    arch["tasks"].append(t)
+                _save_tasks(data)
+                _save_archive(arch)
+                _generate_views(data)
+                self._send_json(200, {"archived_count": len(done), "views_regenerated": True})
+                return
+
+            if parts == ["api", "view", "regenerate"]:
+                data = _load_tasks()
+                _generate_views(data)
+                self._send_json(200, {"views_regenerated": True, "meta": {"task_count": len(data.get("tasks", []))}})
+                return
+
+            self._send_json(404, {"code": "not_found"})
+
+        def do_PATCH(self):
+            parts = self._path_parts()
+            if len(parts) != 3 or parts[0] != "api" or parts[1] != "tasks":
+                self._send_json(404, {"code": "not_found"})
+                return
+            task_id = parts[2]
+            try:
+                body = self._read_json()
+            except Exception:
+                self._send_json(400, {"code": "invalid_json", "message": "request body is not valid json"})
+                return
+            expected = body.get("expected_updated_at")
+            changes = body.get("changes")
+            if not isinstance(changes, dict):
+                self._send_json(400, {"code": "invalid_request", "message": "changes must be object"})
+                return
+            data = _load_tasks()
+            task = _find_task_or_none(data, task_id)
+            if not task:
+                self._send_json(404, {"code": "not_found", "message": "task not found"})
+                return
+            ok, err = _check_expected_updated_at(task, expected)
+            if not ok:
+                self._send_json(409 if err and err.get("code") == "conflict" else 400, err or {})
+                return
+
+            if "title" in changes:
+                title = str(changes.get("title", "")).strip()
+                if not title:
+                    self._send_json(400, {"code": "invalid_request", "message": "title must not be empty"})
+                    return
+                task["title"] = title
+            if "description" in changes:
+                task["description"] = changes.get("description", "") or ""
+            if "tags" in changes:
+                tags = changes.get("tags")
+                if not isinstance(tags, list):
+                    self._send_json(400, {"code": "invalid_request", "message": "tags must be list"})
+                    return
+                task["tags"] = [str(t) for t in tags]
+            if "due_date" in changes:
+                task["due_date"] = changes.get("due_date")
+            if "scheduled_date" in changes:
+                task["scheduled_date"] = changes.get("scheduled_date")
+            if "status" in changes:
+                try:
+                    _apply_status(task, str(changes.get("status")))
+                except ValueError as e:
+                    self._send_json(400, {"code": "invalid_request", "message": str(e)})
+                    return
+            else:
+                task["updated_at"] = _now()
+
+            _save_tasks(data)
+            _generate_views(data)
+            self._send_json(200, {"task": _task_summary(task), "views_regenerated": True})
+
+        def do_DELETE(self):
+            parts = self._path_parts()
+            if len(parts) != 3 or parts[0] != "api" or parts[1] != "tasks":
+                self._send_json(404, {"code": "not_found"})
+                return
+            task_id = parts[2]
+            try:
+                body = self._read_json()
+            except Exception:
+                self._send_json(400, {"code": "invalid_json", "message": "request body is not valid json"})
+                return
+            expected = body.get("expected_updated_at")
+            data = _load_tasks()
+            task = _find_task_or_none(data, task_id)
+            if not task:
+                self._send_json(404, {"code": "not_found", "message": "task not found"})
+                return
+            ok, err = _check_expected_updated_at(task, expected)
+            if not ok:
+                self._send_json(409 if err and err.get("code") == "conflict" else 400, err or {})
+                return
+            data["tasks"].remove(task)
+            _save_tasks(data)
+            _generate_views(data)
+            self._send_json(200, {"deleted_id": task_id, "views_regenerated": True})
+
+    return TaskHTTPRequestHandler
+
+
+def cmd_serve(args) -> None:
+    if not args.no_build:
+        data = _load_tasks()
+        _generate_views(data)
+
+    handler = _build_task_http_handler()
+    try:
+        server = http.server.ThreadingHTTPServer((args.host, args.port), handler)
+    except PermissionError as e:
+        print(f"Failed to bind {args.host}:{args.port}: {e}", file=sys.stderr)
+        return
+    print(f"Serving views at http://{args.host}:{args.port}/")
+    print("Press Ctrl+C to stop.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+def cmd_init(args) -> None:
+    _save_tasks({"tasks": [], "next_id": 1})
+    _save_archive({"tasks": []})
+    _save_json(CONFIG_FILE, {})
+    _generate_views({"tasks": [], "next_id": 1})
+    print("Initialized data files: tasks.json, archive.json, config.json")
 
 
 # ---------------------------------------------------------------------------
@@ -1149,6 +1863,15 @@ def build_parser() -> argparse.ArgumentParser:
     # view
     sub.add_parser("view", help="Generate markdown views")
 
+    # serve
+    p_serve = sub.add_parser("serve", help="Serve generated web views on a local HTTP server")
+    p_serve.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    p_serve.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
+    p_serve.add_argument("--no-build", action="store_true", help="Do not regenerate views before serving")
+
+    # init
+    sub.add_parser("init", help="Initialize local task data")
+
     # push
     p_push = sub.add_parser("push", help="Push tasks to GitHub")
     p_push.add_argument("task_id", nargs="?", help="Specific task ID (optional)")
@@ -1183,6 +1906,8 @@ def main() -> None:
         "unlink": cmd_unlink,
         "archive": cmd_archive,
         "view": cmd_view,
+        "serve": cmd_serve,
+        "init": cmd_init,
         "push": cmd_push,
         "pull": cmd_pull,
         "sync": cmd_sync,

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Task Kanban View</title>
+  <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./kanban.css" />
+</head>
+<body>
+  <main id="app" class="shell kanban-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Task Management CLI</p>
+        <h1 class="title">Kanban View</h1>
+      </div>
+      <div class="meta" id="meta"></div>
+    </header>
+    <section class="controls">
+      <label class="field search">
+        <span>Search</span>
+        <input id="searchInput" type="search" placeholder="task id / title / tag" />
+      </label>
+    </section>
+    <section id="notice" class="notice" aria-live="polite"></section>
+    <section id="board" class="board" aria-label="kanban board"></section>
+  </main>
+
+  <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./api-client.js"></script>
+  <script src="./kanban.js"></script>
+</body>
+</html>

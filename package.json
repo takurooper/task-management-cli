@@ -1,0 +1,14 @@
+{
+  "name": "task-management-cli-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Build-time assets for task-management-cli web views",
+  "scripts": {
+    "build:process-css": "mkdir -p ./web-src/dist/styles && tailwindcss -c tailwind.config.js -i ./web-src/styles/process.tailwind.css -o ./web-src/dist/styles/process.css --minify"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^3.4.10"
+  }
+}

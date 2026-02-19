@@ -1,0 +1,120 @@
+:root {
+  --bg: #f3f6fb;
+  --bg-accent: #e8eef8;
+  --panel: #ffffffd9;
+  --ink: #182035;
+  --muted: #54607a;
+  --line: #d8e0ef;
+  --todo-bg: #e8f3ff;
+  --todo-stroke: #2f6fd9;
+  --progress-bg: #fff2de;
+  --progress-stroke: #cd7a11;
+  --pending-bg: #f3ebff;
+  --pending-stroke: #7a43c5;
+  --done-bg: #e8f8ec;
+  --done-stroke: #2f8a4c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  font-family: "Avenir Next", "Segoe UI Variable", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 12% 10%, #dce8fb 0%, transparent 36%),
+    radial-gradient(circle at 88% 92%, #e9f5ea 0%, transparent 32%),
+    linear-gradient(135deg, var(--bg) 0%, var(--bg-accent) 100%);
+}
+
+.shell {
+  max-width: min(1700px, 96vw);
+  margin: 1.2rem auto;
+  padding: 0.4rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.topbar, .controls {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 16px 42px rgba(18, 35, 69, 0.12);
+}
+
+.topbar {
+  padding: 0.9rem 1.1rem;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.title {
+  margin: 0.15rem 0 0;
+  font-size: clamp(1.1rem, 2.4vw, 1.8rem);
+  line-height: 1.1;
+}
+
+.meta { color: var(--muted); font-size: 0.88rem; }
+
+.controls {
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.field { display: grid; gap: 0.3rem; }
+.field span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.search input {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 999px;
+  min-width: min(420px, 72vw);
+  padding: 0.55rem 0.9rem;
+  outline: none;
+}
+
+.search input:focus {
+  border-color: #7b95d8;
+  box-shadow: 0 0 0 3px rgba(102, 128, 199, 0.16);
+}
+
+.status-filters {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.8rem;
+}
+.status-filters legend {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.status-filters label { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; }
+
+@media (max-width: 900px) {
+  .shell { margin: 0.4rem; padding: 0.2rem; }
+  .search input { min-width: 0; width: 100%; }
+}
