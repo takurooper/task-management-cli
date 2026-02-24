@@ -30,6 +30,143 @@ function wrapText(text, charsPerLine, maxLines) {
   return lines;
 }
 
+// Layout constants (must match task.py _layout_process_graph)
+const LAYOUT = {
+  nodeW: 280, nodeH: 116, colGap: 44, stackGap: 20, rowGap: 36,
+  marginX: 56, marginY: 72, labelColW: 220, rowHeaderH: 34, rowPadX: 18, rowPadY: 16,
+};
+
+function layoutGraph(visibleIds, allEdges, allGroups) {
+  const { nodeW, nodeH, colGap, stackGap, rowGap, marginX, marginY, labelColW, rowHeaderH, rowPadX, rowPadY } = LAYOUT;
+  const visSet = new Set(visibleIds);
+  const edgesByTo = {};
+  for (const e of allEdges) {
+    if (visSet.has(e.from) && visSet.has(e.to)) {
+      (edgesByTo[e.to] ||= []).push(e.from);
+    }
+  }
+
+  const positions = {};  // id -> {x, y, w, h}
+  const groupPositions = {};  // groupId -> {x, y, w, h}
+  let maxRight = marginX;
+  let rowTop = marginY;
+
+  // Grouped nodes
+  for (const grp of [...allGroups].sort((a, b) => a.id < b.id ? -1 : 1)) {
+    const members = (grp.members || []).filter((m) => visSet.has(m)).sort();
+    if (!members.length) { groupPositions[grp.id] = null; continue; }
+
+    const cols = {};
+    const rootId = grp.id;
+    if (members.includes(rootId)) cols[rootId] = 0;
+    let unresolved = members.filter((m) => m !== rootId);
+
+    for (let iter = 0; iter < unresolved.length + 2; iter++) {
+      const next = [];
+      let progressed = false;
+      for (const tid of unresolved) {
+        const intraDeps = (edgesByTo[tid] || []).filter((d) => members.includes(d));
+        if (!intraDeps.length) { cols[tid] = 0; progressed = true; continue; }
+        if (intraDeps.every((d) => d in cols)) { cols[tid] = Math.max(...intraDeps.map((d) => cols[d])) + 1; progressed = true; }
+        else next.push(tid);
+      }
+      unresolved = next;
+      if (!progressed) break;
+    }
+    for (const tid of unresolved) {
+      const intra = (edgesByTo[tid] || []).filter((d) => d in cols);
+      cols[tid] = intra.length ? Math.max(...intra.map((d) => cols[d])) + 1 : 0;
+    }
+
+    const membersByCol = {};
+    for (const m of members) (membersByCol[cols[m] ?? 0] ||= []).push(m);
+    for (const col in membersByCol) membersByCol[col].sort((a, b) => (a !== rootId ? 1 : 0) - (b !== rootId ? 1 : 0) || (a < b ? -1 : 1));
+
+    const maxCol = Math.max(...Object.keys(membersByCol).map(Number));
+    const maxStack = Math.max(...Object.values(membersByCol).map((a) => a.length));
+    const gx = marginX, gy = rowTop;
+    const gw = labelColW + rowPadX * 2 + Math.max(0, (maxCol + 1) * nodeW) + Math.max(0, maxCol * colGap);
+    const gh = rowHeaderH + rowPadY * 2 + Math.max(0, maxStack * nodeH) + Math.max(0, (maxStack - 1) * stackGap);
+
+    const baseX = gx + labelColW + rowPadX;
+    const baseY = gy + rowHeaderH + rowPadY;
+    for (const col of Object.keys(membersByCol).map(Number).sort((a, b) => a - b)) {
+      membersByCol[col].forEach((tid, slot) => {
+        positions[tid] = { x: baseX + col * (nodeW + colGap), y: baseY + slot * (nodeH + stackGap), w: nodeW, h: nodeH };
+      });
+    }
+    groupPositions[grp.id] = { x: gx, y: gy, w: gw, h: gh };
+    maxRight = Math.max(maxRight, gx + gw);
+    rowTop += gh + rowGap;
+  }
+
+  // Ungrouped nodes
+  const groupedIds = new Set();
+  for (const g of allGroups) (g.members || []).forEach((m) => groupedIds.add(m));
+  const ungrouped = visibleIds.filter((id) => !groupedIds.has(id)).sort();
+
+  if (ungrouped.length) {
+    const ugSet = new Set(ungrouped);
+    const ugAdj = {};
+    for (const tid of ungrouped) ugAdj[tid] = new Set();
+    for (const e of allEdges) {
+      if (ugSet.has(e.from) && ugSet.has(e.to)) { ugAdj[e.from].add(e.to); ugAdj[e.to].add(e.from); }
+    }
+    const visited = new Set();
+    const components = [];
+    for (const tid of ungrouped) {
+      if (visited.has(tid)) continue;
+      const queue = [tid]; visited.add(tid); const comp = [];
+      while (queue.length) { const cur = queue.shift(); comp.push(cur); for (const nb of [...ugAdj[cur]].sort()) { if (!visited.has(nb)) { visited.add(nb); queue.push(nb); } } }
+      components.push(comp);
+    }
+    const chains = components.filter((c) => c.length > 1);
+    const singletons = components.filter((c) => c.length === 1).map((c) => c[0]).sort();
+
+    for (const comp of chains) {
+      const compSet = new Set(comp);
+      const cols = {};
+      let remaining = [...comp];
+      for (let iter = 0; iter < remaining.length + 2; iter++) {
+        const nxt = [];
+        for (const tid of remaining) {
+          const intra = (edgesByTo[tid] || []).filter((d) => compSet.has(d));
+          if (!intra.length) cols[tid] = 0;
+          else if (intra.every((d) => d in cols)) cols[tid] = Math.max(...intra.map((d) => cols[d])) + 1;
+          else nxt.push(tid);
+        }
+        remaining = nxt;
+        if (!remaining.length) break;
+      }
+      for (const tid of remaining) cols[tid] = 0;
+
+      const membersByCol = {};
+      for (const tid of comp) (membersByCol[cols[tid]] ||= []).push(tid);
+      const maxStack = Math.max(...Object.values(membersByCol).map((a) => a.length));
+      for (const ci of Object.keys(membersByCol).map(Number).sort((a, b) => a - b)) {
+        membersByCol[ci].forEach((tid, slot) => {
+          positions[tid] = { x: marginX + ci * (nodeW + colGap), y: rowTop + slot * (nodeH + stackGap), w: nodeW, h: nodeH };
+          maxRight = Math.max(maxRight, positions[tid].x + nodeW);
+        });
+      }
+      rowTop += maxStack * nodeH + Math.max(0, (maxStack - 1) * stackGap) + rowGap;
+    }
+
+    if (singletons.length) {
+      const gridCols = 3;
+      for (let i = 0; i < singletons.length; i++) {
+        const gc = i % gridCols, gr = Math.floor(i / gridCols);
+        positions[singletons[i]] = { x: marginX + gc * (nodeW + colGap), y: rowTop + gr * (nodeH + stackGap), w: nodeW, h: nodeH };
+        maxRight = Math.max(maxRight, positions[singletons[i]].x + nodeW);
+      }
+      const numRows = Math.ceil(singletons.length / gridCols);
+      rowTop += numRows * nodeH + Math.max(0, (numRows - 1) * stackGap) + rowGap;
+    }
+  }
+
+  return { positions, groupPositions, canvas: { x: 0, y: 0, width: maxRight + marginX, height: rowTop + marginY } };
+}
+
 export function ProcessView({ data: graph, projects, onDataChanged }) {
   const [activeStatuses, setActiveStatuses] = useState(() => new Set(STATUSES));
   const [query, setQuery] = useState("");
@@ -57,6 +194,7 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
     };
     const nodeEls = new Map();
     const edgeEls = [];
+    const groupEls = new Map();
 
     svg.setAttribute("viewBox", `${state.viewBox.x} ${state.viewBox.y} ${state.viewBox.w} ${state.viewBox.h}`);
 
@@ -241,6 +379,7 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
       label.textContent = `${g.id}: ${g.title}`;
       group.append(box, label);
       groupLayer.appendChild(group);
+      groupEls.set(g.id, { el: group, box, label });
     }
 
     renderEdges();
@@ -287,33 +426,83 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
       nodeEls.set(node.id, g);
     }
 
+    function repositionNode(id, pos) {
+      const el = nodeEls.get(id);
+      if (!el) return;
+      const card = el.querySelector(".node-card");
+      if (card) { card.setAttribute("x", pos.x); card.setAttribute("y", pos.y); card.setAttribute("width", pos.w); card.setAttribute("height", pos.h); }
+      const idText = el.querySelector(".node-id");
+      if (idText) { idText.setAttribute("x", pos.x + 14); idText.setAttribute("y", pos.y + 24); }
+      const titleText = el.querySelector(".node-title");
+      if (titleText) {
+        titleText.setAttribute("x", pos.x + 14); titleText.setAttribute("y", pos.y + 44);
+        titleText.querySelectorAll("tspan").forEach((ts) => ts.setAttribute("x", pos.x + 14));
+      }
+      const statusText = el.querySelector(".node-status");
+      if (statusText) { statusText.setAttribute("x", pos.x + 14); statusText.setAttribute("y", pos.y + pos.h - 14); }
+      // Update nodeData so edgePath uses new positions
+      const nd = nodeData.get(id);
+      if (nd) { nd.x = pos.x; nd.y = pos.y; nd.w = pos.w; nd.h = pos.h; }
+    }
+
     function applyFilters() {
       const currentQuery = graphStateRef.current?.query ?? "";
       const currentStatuses = graphStateRef.current?.activeStatuses ?? new Set(STATUSES);
-      const visibleNodes = new Set();
+      const visibleIds = [];
       for (const [id, el] of nodeEls.entries()) {
         const statusOk = currentStatuses.has(el.dataset.status || "TODO");
         const queryOk = !currentQuery || (el.dataset.title || "").includes(currentQuery) || (el.dataset.id || "").toLowerCase().includes(currentQuery);
         const visible = statusOk && queryOk;
         el.style.display = visible ? "" : "none";
-        if (visible) visibleNodes.add(id);
+        if (visible) visibleIds.push(id);
       }
-      for (const edge of edgeEls) {
-        edge.el.style.display = visibleNodes.has(edge.from) && visibleNodes.has(edge.to) ? "" : "none";
+      const visibleSet = new Set(visibleIds);
+
+      // Re-layout visible nodes
+      const result = layoutGraph(visibleIds, graph.edges || [], graph.groups || []);
+
+      // Reposition visible nodes
+      for (const id of visibleIds) {
+        const pos = result.positions[id];
+        if (pos) repositionNode(id, pos);
       }
-      groupLayer.querySelectorAll("g.group").forEach((g) => {
-        const gid = g.dataset.groupId;
-        const hasVisible = (graph.nodes || []).some((n) => n.project_id === gid && visibleNodes.has(n.id));
-        g.style.display = hasVisible ? "" : "none";
-      });
+
+      // Reposition group boxes
+      for (const [gid, ge] of groupEls.entries()) {
+        const gp = result.groupPositions[gid];
+        if (!gp) { ge.el.style.display = "none"; continue; }
+        ge.el.style.display = "";
+        ge.box.setAttribute("x", gp.x); ge.box.setAttribute("y", gp.y);
+        ge.box.setAttribute("width", gp.w); ge.box.setAttribute("height", gp.h);
+        ge.label.setAttribute("x", gp.x + 16); ge.label.setAttribute("y", gp.y + 24);
+      }
+
+      // Re-render edges with new positions
+      edgeLayer.innerHTML = "";
+      edgeEls.length = 0;
+      for (const edge of graph.edges || []) {
+        if (!visibleSet.has(edge.from) || !visibleSet.has(edge.to)) continue;
+        const from = nodeData.get(edge.from), to = nodeData.get(edge.to);
+        if (!from || !to) continue;
+        const path = document.createElementNS(ns, "path");
+        path.setAttribute("d", edgePath(from, to));
+        path.setAttribute("class", "edge");
+        path.setAttribute("marker-end", "url(#edge-arrow)");
+        edgeLayer.appendChild(path);
+        edgeEls.push({ from: edge.from, to: edge.to, el: path });
+      }
+
+      // Auto-fit viewBox to new canvas
+      state.viewBox.x = result.canvas.x;
+      state.viewBox.y = result.canvas.y;
+      state.viewBox.w = Math.max(1, result.canvas.width);
+      state.viewBox.h = Math.max(1, result.canvas.height);
+      syncViewBox();
     }
 
     function fitToGraph() {
-      state.viewBox.x = graph.canvas?.x ?? 0;
-      state.viewBox.y = graph.canvas?.y ?? 0;
-      state.viewBox.w = Math.max(1, graph.canvas?.width ?? 1200);
-      state.viewBox.h = Math.max(1, graph.canvas?.height ?? 800);
-      syncViewBox();
+      // Re-run applyFilters which recalculates layout and fits
+      applyFilters();
     }
 
     // SVG event handlers
