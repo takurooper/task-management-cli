@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="./kanban.css" />
 </head>
 <body>
-  <main id="app" class="shell kanban-shell">
+  <main class="shell kanban-shell">
     <header class="topbar">
       <div>
         <p class="eyebrow">Task Management CLI</p>
@@ -17,14 +17,7 @@
       </div>
       <div class="meta" id="meta"></div>
     </header>
-    <section class="controls">
-      <label class="field search">
-        <span>Search</span>
-        <input id="searchInput" type="search" placeholder="task id / title / tag" />
-      </label>
-    </section>
-    <section id="notice" class="notice" aria-live="polite"></section>
-    <section id="board" class="board" aria-label="kanban board"></section>
+    <section id="kanbanViewContainer"></section>
   </main>
 
   <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>

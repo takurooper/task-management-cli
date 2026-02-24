@@ -34,20 +34,14 @@
   text-decoration: underline;
 }
 
-.frame-wrap {
+.view-root {
   border: 1px solid var(--line);
   border-radius: 18px;
   overflow: hidden;
   background: #ffffffd9;
   box-shadow: 0 16px 42px rgba(18, 35, 69, 0.12);
+  padding: 0.8rem;
   min-height: min(84vh, 980px);
-}
-
-#viewFrame {
-  width: 100%;
-  height: min(84vh, 980px);
-  border: 0;
-  background: transparent;
 }
 
 @media (max-width: 900px) {
@@ -56,7 +50,7 @@
     width: 100%;
   }
 
-  #viewFrame {
-    height: min(78vh, 760px);
+  .view-root {
+    min-height: min(78vh, 760px);
   }
 }

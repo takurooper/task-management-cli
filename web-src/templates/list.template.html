@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="./list.css" />
 </head>
 <body>
-  <main id="app" class="shell list-shell">
+  <main class="shell list-shell">
     <header class="topbar">
       <div>
         <p class="eyebrow">Task Management CLI</p>
@@ -17,21 +17,7 @@
       </div>
       <div class="meta" id="meta"></div>
     </header>
-    <section class="controls">
-      <label class="field search">
-        <span>Search</span>
-        <input id="searchInput" type="search" placeholder="task id / title / tag" />
-      </label>
-      <fieldset class="status-filters">
-        <legend>Status</legend>
-        <label><input type="checkbox" value="TODO" checked />TODO</label>
-        <label><input type="checkbox" value="IN_PROGRESS" checked />IN_PROGRESS</label>
-        <label><input type="checkbox" value="PENDING" checked />PENDING</label>
-        <label><input type="checkbox" value="DONE" checked />DONE</label>
-      </fieldset>
-    </section>
-    <section id="notice" class="notice" aria-live="polite"></section>
-    <section id="listRoot" class="list-root"></section>
+    <section id="listViewContainer"></section>
   </main>
 
   <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>

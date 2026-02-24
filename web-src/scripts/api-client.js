@@ -20,6 +20,9 @@
   }
 
   window.TaskApi = {
+    getViewsData() {
+      return request("/api/views/data", { method: "GET" });
+    },
     getTasks() {
       return request("/api/tasks", { method: "GET" });
     },

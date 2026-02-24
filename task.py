@@ -464,6 +464,10 @@ def _generate_web_shell_view() -> None:
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Task Views</title>
   <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./task-popup.css" />
+  <link rel="stylesheet" href="./list.css" />
+  <link rel="stylesheet" href="./kanban.css" />
+  <link rel="stylesheet" href="./process.css" />
   <link rel="stylesheet" href="./shell.css" />
 </head>
 <body>
@@ -473,17 +477,21 @@ def _generate_web_shell_view() -> None:
         <p class="eyebrow">Task Management CLI</p>
         <h1 class="title">View Switcher</h1>
       </div>
-      <div class="meta">list / kanban / process</div>
+      <div class="meta" id="shellMeta"></div>
     </header>
     <section class="controls switcher-controls">
       <button type="button" data-view="list">List</button>
       <button type="button" data-view="kanban">Kanban</button>
       <button type="button" data-view="process">Process</button>
+      <a class="open-link" id="openCurrent" href="./list.html" target="_blank" rel="noopener">Open in new tab</a>
     </section>
-    <section class="frame-wrap">
-      <iframe id="viewFrame" title="Task view frame" loading="eager"></iframe>
-    </section>
+    <section id="viewRoot" class="view-root"></section>
   </main>
+  <script src="./api-client.js"></script>
+  <script src="./task-popup.js"></script>
+  <script src="./list.js"></script>
+  <script src="./kanban.js"></script>
+  <script src="./process.js"></script>
   <script src="./shell.js"></script>
 </body>
 </html>
@@ -498,7 +506,7 @@ def _generate_web_shell_view() -> None:
     _copy_web_asset_to_views(
         _web_style_path("shell"),
         "shell.css",
-        ".frame-wrap{height:80vh}.frame-wrap iframe{width:100%;height:100%;border:0}",
+        ".view-root{min-height:80vh;padding:0.8rem}",
     )
 
 
@@ -850,11 +858,23 @@ def _generate_process_web_view(tasks: list[dict], projects: list[dict] = None) -
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Task Process View</title>
   <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./task-popup.css" />
   <link rel="stylesheet" href="./process.css" />
 </head>
 <body>
-  <main id="app"></main>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Task Management CLI</p>
+        <h1 class="title">Process View</h1>
+      </div>
+      <div class="meta" id="meta"></div>
+    </header>
+    <section id="processViewContainer"></section>
+  </main>
   <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./api-client.js"></script>
+  <script src="./task-popup.js"></script>
   <script src="./process.js"></script>
 </body>
 </html>
@@ -872,11 +892,23 @@ def _generate_list_web_view(tasks: list[dict], projects: list[dict] = None) -> N
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Task List View</title>
   <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./task-popup.css" />
   <link rel="stylesheet" href="./list.css" />
 </head>
 <body>
-  <main id="app"></main>
+  <main class="shell list-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Task Management CLI</p>
+        <h1 class="title">List View</h1>
+      </div>
+      <div class="meta" id="meta"></div>
+    </header>
+    <section id="listViewContainer"></section>
+  </main>
   <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./api-client.js"></script>
+  <script src="./task-popup.js"></script>
   <script src="./list.js"></script>
 </body>
 </html>
@@ -894,11 +926,23 @@ def _generate_kanban_web_view(tasks: list[dict], projects: list[dict] = None) ->
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Task Kanban View</title>
   <link rel="stylesheet" href="./common.css" />
+  <link rel="stylesheet" href="./task-popup.css" />
   <link rel="stylesheet" href="./kanban.css" />
 </head>
 <body>
-  <main id="app"></main>
+  <main class="shell kanban-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Task Management CLI</p>
+        <h1 class="title">Kanban View</h1>
+      </div>
+      <div class="meta" id="meta"></div>
+    </header>
+    <section id="kanbanViewContainer"></section>
+  </main>
   <script id="web-view-data" type="application/json">__WEB_VIEW_DATA_JSON__</script>
+  <script src="./api-client.js"></script>
+  <script src="./task-popup.js"></script>
   <script src="./kanban.js"></script>
 </body>
 </html>
@@ -1261,9 +1305,12 @@ def _tasks_payload(data: dict) -> dict:
 
 
 def _build_task_http_handler():
+    dist_dir = VIEWS_DIR / "dist"
+    serve_dir = str(dist_dir) if dist_dir.is_dir() else str(VIEWS_DIR)
+
     class TaskHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=str(VIEWS_DIR), **kwargs)
+            super().__init__(*args, directory=serve_dir, **kwargs)
 
         def _send_json(self, status: int, payload: dict) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -1293,6 +1340,27 @@ def _build_task_http_handler():
                 data = _load_tasks()
                 self._send_json(200, _tasks_payload(data))
                 return
+            if parts == ["api", "views", "data"]:
+                data = _load_tasks()
+                all_tasks = data["tasks"]
+                projects = data.get("projects", [])
+                list_payload = _build_list_web_payload(all_tasks)
+                list_payload["projects"] = projects
+                kanban_payload = _build_kanban_web_payload(all_tasks)
+                kanban_payload["projects"] = projects
+                process_payload = _build_process_web_payload(all_tasks, projects)
+                self._send_json(200, {
+                    "list": list_payload,
+                    "kanban": kanban_payload,
+                    "process": process_payload,
+                    "projects": projects,
+                })
+                return
+            # SPA fallback: serve index.html for non-file paths
+            parsed = urlparse(self.path)
+            file_path = Path(serve_dir) / parsed.path.lstrip("/")
+            if not file_path.is_file() and not parsed.path.startswith("/api/"):
+                self.path = "/index.html"
             super().do_GET()
 
         def do_POST(self):
