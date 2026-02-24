@@ -2,6 +2,7 @@
   let overlay = null;
   let currentTask = null;
   let callbacks = {};
+  let projectsList = [];
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -36,6 +37,14 @@
             <span class="tp-label">Status</span>
             <select class="tp-select" name="status">
               ${["TODO", "IN_PROGRESS", "PENDING", "DONE"].map((s) => `<option value="${s}"${task.status === s ? " selected" : ""}>${s}</option>`).join("")}
+            </select>
+          </label>
+
+          <label class="tp-field">
+            <span class="tp-label">Project</span>
+            <select class="tp-select" name="project_id">
+              <option value=""${!task.project_id ? " selected" : ""}>(none)</option>
+              ${projectsList.map((p) => `<option value="${escapeHtml(p.id)}"${task.project_id === p.id ? " selected" : ""}>${escapeHtml(p.title)}</option>`).join("")}
             </select>
           </label>
 
@@ -94,6 +103,13 @@
 
     const status = get("status");
     if (status && status !== currentTask.status) changes.status = status;
+
+    const projectId = get("project_id");
+    if (projectId !== undefined) {
+      const newPid = projectId || null;
+      const oldPid = currentTask.project_id || null;
+      if (newPid !== oldPid) changes.project_id = newPid;
+    }
 
     const scheduled = get("scheduled_date");
     if (scheduled !== undefined && scheduled !== (currentTask.scheduled_date || "")) {
@@ -164,6 +180,7 @@
     close();
     currentTask = { ...task };
     callbacks = cbs || {};
+    projectsList = (cbs && cbs.projects) || window._projects || [];
     overlay = buildDom(currentTask);
     document.body.appendChild(overlay);
 

@@ -44,10 +44,10 @@
         body: JSON.stringify({ op, from_id: fromId, to_id: toId, expected_updated_at: expectedUpdatedAt }),
       });
     },
-    linkParent(op, parentId, childId, expectedUpdatedAt) {
-      return request("/api/links/parent", {
+    linkProject(op, projectId, taskId, expectedUpdatedAt) {
+      return request("/api/links/project", {
         method: "POST",
-        body: JSON.stringify({ op, parent_id: parentId, child_id: childId, expected_updated_at: expectedUpdatedAt }),
+        body: JSON.stringify({ op, project_id: projectId, task_id: taskId, expected_updated_at: expectedUpdatedAt }),
       });
     },
     archiveDone() {

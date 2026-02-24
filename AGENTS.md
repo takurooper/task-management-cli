@@ -29,13 +29,13 @@ cd docs/todo
 ```bash
 python task.py add "タスク名"
 python task.py add "タスク名" --tag github --due 2026-03-01 --scheduled 2026-02-20
-python task.py add "子タスク" --parent t001 --depends t002
+python task.py add "タスク" --project p001 --depends t002
 ```
 
 - `--tag`: タグ付け（複数指定可）。`github` タグを付けるとGitHub Projectsに同期対象になる
 - `--due`: 期限日
 - `--scheduled`: 実施予定日
-- `--parent`: 親タスクID
+- `--project`: プロジェクトID（`p001` 等。`tasks.json` の `projects` リストで定義）
 - `--depends`: 依存タスクID（複数指定可）
 
 ### ステータス変更
@@ -61,9 +61,9 @@ python task.py edit t001 --due 2026-04-01 --scheduled 2026-03-15
 
 ```bash
 python task.py link --from t001 --to t003       # t001完了後にt003着手可能（依存関係）
-python task.py link --parent t001 --child t002  # t002をt001の子タスクに
+python task.py link --project p001 --task t002  # t002をプロジェクトp001に追加
 python task.py unlink --from t001 --to t003     # 依存解除
-python task.py unlink --parent t001 --child t002  # 親子解除
+python task.py unlink --project p001 --task t002  # プロジェクトから除外
 ```
 
 ### タスク削除・アーカイブ
@@ -71,13 +71,35 @@ python task.py unlink --parent t001 --child t002  # 親子解除
 ```bash
 python task.py delete t001   # タスク削除
 python task.py archive       # DONE タスクを archive.json に移動
+python task.py archive --last-week  # 先週(月〜金)完了分をアーカイブ＋週報生成
 ```
+
+`--last-week` を指定すると `reports/YYYY-MM-DD.md` に週報マークダウンが自動生成される。
 
 ## JSON直接編集
 
 CLIが使えない場合やバッチ操作時は `tasks.json` を直接編集してもよい。
 
-### タスクのデータ構造
+### データ構造
+
+#### プロジェクト
+
+`tasks.json` の `projects` リストに事前定義されている。タスクはプロジェクトに属することができる（1対多）。
+
+```json
+{
+  "projects": [
+    {"id": "p001", "title": "[コンセプト4] ゴールデンルートUI"},
+    {"id": "p002", "title": "インタラクティブアプリ"}
+  ],
+  "next_project_id": 3
+}
+```
+
+- `id` は `p` + 3桁ゼロ埋め（例: `p001`, `p005`）
+- プロジェクトの追加は `tasks.json` を直接編集し `next_project_id` を更新
+
+#### タスク
 
 ```json
 {
@@ -89,7 +111,7 @@ CLIが使えない場合やバッチ操作時は `tasks.json` を直接編集し
   "due_date": "2026-03-01",
   "scheduled_date": "2026-02-16",
   "completed_date": null,
-  "parent_id": null,
+  "project_id": null,
   "dependencies": ["t002", "t003"],
   "created_at": "2026-02-16T02:36:49Z",
   "updated_at": "2026-02-16T02:36:49Z",
@@ -112,7 +134,7 @@ CLIが使えない場合やバッチ操作時は `tasks.json` を直接編集し
 
 | ファイル | 内容 |
 |---------|------|
-| `views/list.md` | チェックボックス付きリスト（親子構造付き） |
+| `views/list.md` | チェックボックス付きリスト（プロジェクト構造付き） |
 | `views/kanban.md` | Mermaid kanban ダイアグラム |
 | `views/process.md` | 依存関係を矢印で示す Mermaid プロセス図 |
 

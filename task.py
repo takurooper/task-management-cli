@@ -24,6 +24,7 @@ TASKS_FILE = BASE_DIR / "tasks.json"
 ARCHIVE_FILE = BASE_DIR / "archive.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 VIEWS_DIR = BASE_DIR / "views"
+REPORTS_DIR = BASE_DIR / "reports"
 WEB_SRC_DIR = BASE_DIR / "web-src"
 WEB_TEMPLATES_DIR = WEB_SRC_DIR / "templates"
 WEB_SCRIPTS_DIR = WEB_SRC_DIR / "scripts"
@@ -63,6 +64,8 @@ def _load_tasks() -> dict:
     data = _load_json(TASKS_FILE)
     if "tasks" not in data:
         data = {"tasks": [], "next_id": 1}
+    if "projects" not in data:
+        data["projects"] = []
     return data
 
 
@@ -105,7 +108,7 @@ def _new_task(data: dict, title: str, **kwargs) -> dict:
         "due_date": kwargs.get("due_date"),
         "scheduled_date": kwargs.get("scheduled_date"),
         "completed_date": None,
-        "parent_id": kwargs.get("parent_id"),
+        "project_id": kwargs.get("project_id"),
         "dependencies": kwargs.get("dependencies", []),
         "created_at": now,
         "updated_at": now,
@@ -122,20 +125,15 @@ def _new_task(data: dict, title: str, **kwargs) -> dict:
 def _generate_views(data: dict) -> None:
     VIEWS_DIR.mkdir(parents=True, exist_ok=True)
     all_tasks = data["tasks"]
-    tasks_for_list_kanban = _exclude_parent_tasks(all_tasks)
-    _generate_list_view(tasks_for_list_kanban)
-    _generate_kanban_view(tasks_for_list_kanban)
-    _generate_process_view(all_tasks)
+    projects = data.get("projects", [])
+    _generate_list_view(all_tasks)
+    _generate_kanban_view(all_tasks)
+    _generate_process_view(all_tasks, projects)
     _generate_common_web_style()
-    _generate_list_web_view(tasks_for_list_kanban)
-    _generate_kanban_web_view(tasks_for_list_kanban)
-    _generate_process_web_view(all_tasks)
+    _generate_list_web_view(all_tasks, projects)
+    _generate_kanban_web_view(all_tasks, projects)
+    _generate_process_web_view(all_tasks, projects)
     _generate_web_shell_view()
-
-
-def _exclude_parent_tasks(tasks: list[dict]) -> list[dict]:
-    parent_ids = {t.get("parent_id") for t in tasks if t.get("parent_id")}
-    return [t for t in tasks if t["id"] not in parent_ids]
 
 
 def _task_line(t: dict, indent: int = 0) -> str:
@@ -257,17 +255,17 @@ def _mermaid_escape(text: str) -> str:
     return text
 
 
-def _generate_process_view(active: list) -> None:
+def _generate_process_view(active: list, projects: list[dict] = None) -> None:
+    projects = projects or []
+    project_map = {p["id"]: p for p in projects}
     task_map = {t["id"]: t for t in active}
 
-    # Build parent-children map
-    parent_children: dict[str, list[str]] = {}
-    children_set: set[str] = set()
+    # Build project-tasks map
+    project_tasks: dict[str, list[str]] = {}
     for t in active:
-        pid = t.get("parent_id")
-        if pid and pid in task_map:
-            parent_children.setdefault(pid, []).append(t["id"])
-            children_set.add(t["id"])
+        pid = t.get("project_id")
+        if pid and pid in project_map:
+            project_tasks.setdefault(pid, []).append(t["id"])
 
     # Build adjacency for connected components (undirected)
     neighbors: dict[str, set[str]] = {t["id"]: set() for t in active}
@@ -276,10 +274,13 @@ def _generate_process_view(active: list) -> None:
             if dep in task_map:
                 neighbors[t["id"]].add(dep)
                 neighbors[dep].add(t["id"])
-        pid = t.get("parent_id")
-        if pid and pid in task_map:
-            neighbors[t["id"]].add(pid)
-            neighbors[pid].add(t["id"])
+        # Connect tasks in the same project
+        pid = t.get("project_id")
+        if pid and pid in project_map:
+            for sibling in project_tasks.get(pid, []):
+                if sibling != t["id"]:
+                    neighbors[t["id"]].add(sibling)
+                    neighbors[sibling].add(t["id"])
 
     # Find connected components via BFS
     visited: set[str] = set()
@@ -336,14 +337,12 @@ def _generate_process_view(active: list) -> None:
 
     lines = ["# プロセス図\n", "```mermaid", "flowchart LR"]
 
-    # Render parent-child groups as subgraphs
+    # Render project groups as subgraphs
     rendered: set[str] = set()
-    for pid in sorted(parent_children.keys()):
-        t = task_map[pid]
-        title = _mermaid_escape(t["title"])
+    for pid in sorted(project_tasks.keys()):
+        title = _mermaid_escape(project_map[pid]["title"])
         lines.append(f'    subgraph {pid}["{pid}: {title}"]')
-        rendered.add(pid)
-        for cid in sorted(parent_children[pid]):
+        for cid in sorted(project_tasks[pid]):
             ct = task_map[cid]
             ctitle = _mermaid_escape(ct["title"])
             lines.append(f'        {cid}["{cid}<br>{ctitle}"]')
@@ -374,21 +373,14 @@ def _generate_process_view(active: list) -> None:
 
     status_class = {"TODO": "todo", "IN_PROGRESS": "inprogress", "PENDING": "pending", "DONE": "done"}
     for status, cls in status_class.items():
-        ids = [t["id"] for t in active if t["status"] == status and t["id"] not in parent_children]
+        ids = [t["id"] for t in active if t["status"] == status]
         if ids:
             lines.append(f"    class {','.join(ids)} {cls}")
 
-    # Subgraph styles based on parent status
-    sg_style = {
-        "TODO": "fill:#f0f8ff,stroke:#007aff,stroke-width:2px",
-        "IN_PROGRESS": "fill:#fff8f0,stroke:#ff9f0a,stroke-width:2px",
-        "PENDING": "fill:#f8f0ff,stroke:#af52de,stroke-width:2px",
-        "DONE": "fill:#f0fff2,stroke:#34c759,stroke-width:2px",
-    }
-    for pid in parent_children:
-        status = task_map[pid]["status"]
-        if status in sg_style:
-            lines.append(f"    style {pid} {sg_style[status]}")
+    # Subgraph styles
+    sg_style = "fill:#f0f8ff,stroke:#007aff,stroke-width:2px"
+    for pid in project_tasks:
+        lines.append(f"    style {pid} {sg_style}")
 
     lines.append("```")
     lines.append(f"\n---\n*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n")
@@ -520,7 +512,7 @@ def _task_summary(task: dict) -> dict:
         "scheduled_date": task.get("scheduled_date"),
         "completed_date": task.get("completed_date"),
         "updated_at": task.get("updated_at"),
-        "parent_id": task.get("parent_id"),
+        "project_id": task.get("project_id"),
         "dependencies": task.get("dependencies", []),
         "github_issue_number": task.get("github_issue_number"),
     }
@@ -554,11 +546,12 @@ def _build_kanban_web_payload(tasks: list[dict]) -> dict:
     }
 
 
-def _build_process_graph_model(tasks: list[dict]) -> dict:
+def _build_process_graph_model(tasks: list[dict], projects: list[dict] = None) -> dict:
+    projects = projects or []
+    project_map = {p["id"]: p for p in projects}
     sorted_tasks = sorted(tasks, key=lambda t: t["id"])
     task_map = {t["id"]: t for t in sorted_tasks}
     valid_ids = set(task_map.keys())
-    parent_ids = {t.get("parent_id") for t in sorted_tasks if t.get("parent_id")}
 
     nodes = []
     edges = []
@@ -566,17 +559,11 @@ def _build_process_graph_model(tasks: list[dict]) -> dict:
 
     for tid in sorted(valid_ids):
         t = task_map[tid]
-        parent_id = t.get("parent_id")
-        if parent_id not in valid_ids or parent_id == tid:
-            parent_id = None
-        if parent_id:
-            project_id = parent_id
-            project_members.setdefault(parent_id, []).append(tid)
-        elif tid in parent_ids:
-            project_id = tid
-            project_members.setdefault(tid, []).append(tid)
-        else:
+        project_id = t.get("project_id")
+        if project_id and project_id not in project_map:
             project_id = None
+        if project_id:
+            project_members.setdefault(project_id, []).append(tid)
 
         status = t.get("status", "TODO")
         if status not in STATUSES:
@@ -596,9 +583,7 @@ def _build_process_graph_model(tasks: list[dict]) -> dict:
                 "title": t.get("title", ""),
                 "status": status,
                 "updated_at": t.get("updated_at"),
-                "parent_id": parent_id,
                 "project_id": project_id,
-                "is_parent": tid in parent_ids,
                 "dependencies": deps,
                 "tags": t.get("tags", []),
             }
@@ -609,8 +594,7 @@ def _build_process_graph_model(tasks: list[dict]) -> dict:
         groups.append(
             {
                 "id": pid,
-                "title": task_map[pid].get("title", ""),
-                "status": task_map[pid].get("status", "TODO"),
+                "title": project_map[pid].get("title", ""),
                 "members": sorted(project_members[pid]),
             }
         )
@@ -620,7 +604,7 @@ def _build_process_graph_model(tasks: list[dict]) -> dict:
 
 def _layout_process_graph(model: dict) -> dict:
     # Project-row layout:
-    # - one horizontal row per project (parent task)
+    # - one horizontal row per project
     # - projects are stacked vertically and never overlap
     # - tasks inside each row expand to the right based on dependencies
     node_w = 280
@@ -651,7 +635,7 @@ def _layout_process_graph(model: dict) -> dict:
             continue
 
         root_id = group["id"]
-        render_members = [m for m in members if not node_map[m].get("is_parent")]
+        render_members = [m for m in members if m in node_map]
         cols: dict[str, int] = {}
         if root_id in render_members:
             cols[root_id] = 0
@@ -724,7 +708,6 @@ def _layout_process_graph(model: dict) -> dict:
             {
                 "id": group["id"],
                 "title": group["title"],
-                "status": group["status"],
                 "x": group_x,
                 "y": group_y,
                 "w": group_w,
@@ -736,7 +719,7 @@ def _layout_process_graph(model: dict) -> dict:
         max_right = max(max_right, group_x + group_w)
         row_top += group_h + row_gap
 
-    # ── Place ungrouped nodes (no parent, not a parent) ──
+    # ── Place ungrouped nodes (no project, not a project) ──
     grouped_ids: set[str] = set()
     for g in model["groups"]:
         grouped_ids.update(g["members"])
@@ -838,13 +821,15 @@ def _layout_process_graph(model: dict) -> dict:
     return {"nodes": placed_nodes, "groups": placed_groups, "canvas": canvas}
 
 
-def _build_process_web_payload(tasks: list[dict]) -> dict:
-    model = _build_process_graph_model(tasks)
+def _build_process_web_payload(tasks: list[dict], projects: list[dict] = None) -> dict:
+    projects = projects or []
+    model = _build_process_graph_model(tasks, projects)
     layout = _layout_process_graph(model)
     return {
         "nodes": layout["nodes"],
         "edges": model["edges"],
         "groups": layout["groups"],
+        "projects": projects,
         "canvas": layout["canvas"],
         "meta": {
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -856,8 +841,8 @@ def _build_process_web_payload(tasks: list[dict]) -> dict:
     }
 
 
-def _generate_process_web_view(tasks: list[dict]) -> None:
-    payload = _build_process_web_payload(tasks)
+def _generate_process_web_view(tasks: list[dict], projects: list[dict] = None) -> None:
+    payload = _build_process_web_payload(tasks, projects)
     default_template = """<!doctype html>
 <html lang="ja">
 <head>
@@ -877,8 +862,9 @@ def _generate_process_web_view(tasks: list[dict]) -> None:
     _render_web_view("process", payload, default_template)
 
 
-def _generate_list_web_view(tasks: list[dict]) -> None:
+def _generate_list_web_view(tasks: list[dict], projects: list[dict] = None) -> None:
     payload = _build_list_web_payload(tasks)
+    payload["projects"] = projects or []
     default_template = """<!doctype html>
 <html lang="ja">
 <head>
@@ -898,8 +884,9 @@ def _generate_list_web_view(tasks: list[dict]) -> None:
     _render_web_view("list", payload, default_template)
 
 
-def _generate_kanban_web_view(tasks: list[dict]) -> None:
+def _generate_kanban_web_view(tasks: list[dict], projects: list[dict] = None) -> None:
     payload = _build_kanban_web_payload(tasks)
+    payload["projects"] = projects or []
     default_template = """<!doctype html>
 <html lang="ja">
 <head>
@@ -926,6 +913,12 @@ def cmd_add(args) -> None:
     data = _load_tasks()
     tags = args.tag if args.tag else []
     deps = args.depends if args.depends else []
+    project_id = args.project
+    if project_id:
+        project_map = {p["id"]: p for p in data.get("projects", [])}
+        if project_id not in project_map:
+            print(f"Project {project_id} not found.")
+            return
     task = _new_task(
         data,
         args.title,
@@ -933,7 +926,7 @@ def cmd_add(args) -> None:
         tags=tags,
         due_date=args.due,
         scheduled_date=args.scheduled,
-        parent_id=args.parent,
+        project_id=project_id,
         dependencies=deps,
     )
     _save_tasks(data)
@@ -1063,9 +1056,9 @@ def cmd_pending(args) -> None:
 def cmd_link(args) -> None:
     data = _load_tasks()
     has_dep = args.from_id and args.to_id
-    has_parent = args.parent and args.child
-    if not has_dep and not has_parent:
-        print("Usage: link --from <id> --to <id>  OR  link --parent <id> --child <id>")
+    has_project = args.project and args.task
+    if not has_dep and not has_project:
+        print("Usage: link --from <id> --to <id>  OR  link --project <id> --task <id>")
         return
     if has_dep:
         from_t = _find_task(data, args.from_id)
@@ -1080,18 +1073,18 @@ def cmd_link(args) -> None:
             to_t["dependencies"].append(args.from_id)
         to_t["updated_at"] = _now()
         print(f"Linked {args.from_id} -> {args.to_id} ({args.to_id} depends on {args.from_id})")
-    if has_parent:
-        parent_t = _find_task(data, args.parent)
-        child_t = _find_task(data, args.child)
-        if not parent_t:
-            print(f"Parent task {args.parent} not found.")
+    if has_project:
+        project_map = {p["id"]: p for p in data.get("projects", [])}
+        if args.project not in project_map:
+            print(f"Project {args.project} not found.")
             return
-        if not child_t:
-            print(f"Child task {args.child} not found.")
+        task_t = _find_task(data, args.task)
+        if not task_t:
+            print(f"Task {args.task} not found.")
             return
-        child_t["parent_id"] = args.parent
-        child_t["updated_at"] = _now()
-        print(f"Linked {args.child} as child of {args.parent}")
+        task_t["project_id"] = args.project
+        task_t["updated_at"] = _now()
+        print(f"Linked {args.task} to project {args.project}")
     _save_tasks(data)
     _generate_views(data)
 
@@ -1099,9 +1092,9 @@ def cmd_link(args) -> None:
 def cmd_unlink(args) -> None:
     data = _load_tasks()
     has_dep = args.from_id and args.to_id
-    has_parent = args.parent and args.child
-    if not has_dep and not has_parent:
-        print("Usage: unlink --from <id> --to <id>  OR  unlink --parent <id> --child <id>")
+    has_project = args.project and args.task
+    if not has_dep and not has_project:
+        print("Usage: unlink --from <id> --to <id>  OR  unlink --project <id> --task <id>")
         return
     if has_dep:
         to_t = _find_task(data, args.to_id)
@@ -1112,22 +1105,99 @@ def cmd_unlink(args) -> None:
             to_t["dependencies"].remove(args.from_id)
         to_t["updated_at"] = _now()
         print(f"Unlinked dependency {args.from_id} -> {args.to_id}")
-    if has_parent:
-        child_t = _find_task(data, args.child)
-        if not child_t:
-            print(f"Child task {args.child} not found.")
+    if has_project:
+        task_t = _find_task(data, args.task)
+        if not task_t:
+            print(f"Task {args.task} not found.")
             return
-        child_t["parent_id"] = None
-        child_t["updated_at"] = _now()
-        print(f"Unlinked {args.child} from parent {args.parent}")
+        task_t["project_id"] = None
+        task_t["updated_at"] = _now()
+        print(f"Unlinked {args.task} from project {args.project}")
     _save_tasks(data)
     _generate_views(data)
 
 
+def _extract_short_title(title: str, has_project: bool) -> str:
+    """タスクタイトルからプレフィックスを除去して要点のみ抽出する。"""
+    import re
+    # "[コンセプト4: Phase 2-1] ゴールデンルート: ..." → ブラケット除去
+    m = re.match(r"\[.*?\]\s*", title)
+    if m:
+        title = title[m.end():]
+    if has_project:
+        parts = title.split(": ")
+        if len(parts) > 1:
+            return parts[-1]
+    return title
+
+
+def _generate_weekly_report(archived_tasks: list, date_from: str, date_to: str,
+                            all_tasks_data: dict, archive_data: dict) -> Path:
+    """アーカイブ対象タスクから週報マークダウンを生成して保存する。"""
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # プロジェクトタイトル検索用マップ
+    project_map = {p["id"]: p["title"] for p in all_tasks_data.get("projects", [])}
+
+    # project_id でグループ化
+    from collections import OrderedDict
+    groups: dict[str, list[str]] = OrderedDict()
+    standalone: list[str] = []
+    for t in archived_tasks:
+        pid = t.get("project_id")
+        if pid and pid in project_map:
+            group_name = _extract_short_title(project_map[pid], False)
+            short = _extract_short_title(t["title"], True)
+            groups.setdefault(group_name, []).append(short)
+        else:
+            standalone.append(_extract_short_title(t["title"], False))
+
+    # レポート本文
+    f_from = date_from[5:].replace("-", "")
+    f_to = date_to[5:].replace("-", "")
+    title = f"週報 ({f_from}-{f_to})"
+    lines = [f"# {title}", ""]
+
+    for group_name, items in groups.items():
+        lines.append(f"**{group_name}**: {'、'.join(items)}。")
+        lines.append("")
+
+    if standalone:
+        max_items = 5
+        if len(standalone) <= max_items:
+            lines.append(f"**その他**: {'、'.join(standalone)}。")
+        else:
+            shown = '、'.join(standalone[:max_items])
+            lines.append(f"**その他**: {shown} 等、計{len(standalone)}件完了。")
+        lines.append("")
+
+    report_path = REPORTS_DIR / f"{title}.md"
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
+
+
 def cmd_archive(args) -> None:
+    from datetime import date, timedelta
     data = _load_tasks()
     arch = _load_archive()
-    done = [t for t in data["tasks"] if t["status"] == "DONE"]
+
+    if getattr(args, "last_week", False):
+        today = date.today()
+        # 直近の月曜日を起点に「先週月曜〜先週金曜」を計算
+        last_monday = today - timedelta(days=today.weekday() + 7)
+        last_friday = last_monday + timedelta(days=4)
+        date_from = last_monday.isoformat()
+        date_to = last_friday.isoformat()
+        done = [
+            t for t in data["tasks"]
+            if t["status"] == "DONE"
+            and t.get("completed_date")
+            and date_from <= t["completed_date"] <= date_to
+        ]
+        print(f"Archiving tasks completed {date_from} to {date_to}...")
+    else:
+        done = [t for t in data["tasks"] if t["status"] == "DONE"]
+
     if not done:
         print("No completed tasks to archive.")
         return
@@ -1138,6 +1208,10 @@ def cmd_archive(args) -> None:
     _save_archive(arch)
     _generate_views(data)
     print(f"Archived {len(done)} task(s).")
+
+    if getattr(args, "last_week", False):
+        report_path = _generate_weekly_report(done, date_from, date_to, data, arch)
+        print(f"Weekly report: {report_path}")
 
 
 def cmd_view(args) -> None:
@@ -1178,6 +1252,7 @@ def _tasks_payload(data: dict) -> dict:
     tasks = sorted(data.get("tasks", []), key=lambda t: t["id"])
     return {
         "tasks": [_task_summary(t) for t in tasks],
+        "projects": data.get("projects", []),
         "meta": {
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "count": len(tasks),
@@ -1244,7 +1319,7 @@ def _build_task_http_handler():
                     tags=body.get("tags") if isinstance(body.get("tags"), list) else [],
                     due_date=body.get("due_date"),
                     scheduled_date=body.get("scheduled_date"),
-                    parent_id=body.get("parent_id"),
+                    project_id=body.get("project_id"),
                     dependencies=body.get("dependencies") if isinstance(body.get("dependencies"), list) else [],
                 )
                 _save_tasks(data)
@@ -1281,35 +1356,36 @@ def _build_task_http_handler():
                 self._send_json(200, {"task": _task_summary(to_t), "views_regenerated": True})
                 return
 
-            if parts == ["api", "links", "parent"]:
+            if parts == ["api", "links", "project"]:
                 op = body.get("op")
-                parent_id = body.get("parent_id")
-                child_id = body.get("child_id")
+                project_id = body.get("project_id")
+                task_id = body.get("task_id")
                 expected = body.get("expected_updated_at")
-                if op not in ("add", "remove") or not child_id:
-                    self._send_json(400, {"code": "invalid_request", "message": "op/child_id are required"})
+                if op not in ("add", "remove") or not task_id:
+                    self._send_json(400, {"code": "invalid_request", "message": "op/task_id are required"})
                     return
                 data = _load_tasks()
-                child = _find_task_or_none(data, str(child_id))
-                parent = _find_task_or_none(data, str(parent_id)) if parent_id else None
-                if not child:
-                    self._send_json(404, {"code": "not_found", "message": "child task not found"})
+                task = _find_task_or_none(data, str(task_id))
+                if not task:
+                    self._send_json(404, {"code": "not_found", "message": "task not found"})
                     return
-                if op == "add" and not parent:
-                    self._send_json(404, {"code": "not_found", "message": "parent task not found"})
-                    return
-                ok, err = _check_expected_updated_at(child, expected)
+                if op == "add":
+                    project_map = {p["id"]: p for p in data.get("projects", [])}
+                    if not project_id or str(project_id) not in project_map:
+                        self._send_json(404, {"code": "not_found", "message": "project not found"})
+                        return
+                ok, err = _check_expected_updated_at(task, expected)
                 if not ok:
                     self._send_json(409 if err and err.get("code") == "conflict" else 400, err or {})
                     return
                 if op == "add":
-                    child["parent_id"] = parent["id"]
+                    task["project_id"] = str(project_id)
                 else:
-                    child["parent_id"] = None
-                child["updated_at"] = _now()
+                    task["project_id"] = None
+                task["updated_at"] = _now()
                 _save_tasks(data)
                 _generate_views(data)
-                self._send_json(200, {"task": _task_summary(child), "views_regenerated": True})
+                self._send_json(200, {"task": _task_summary(task), "views_regenerated": True})
                 return
 
             if parts == ["api", "archive"]:
@@ -1377,6 +1453,14 @@ def _build_task_http_handler():
                 task["due_date"] = changes.get("due_date")
             if "scheduled_date" in changes:
                 task["scheduled_date"] = changes.get("scheduled_date")
+            if "project_id" in changes:
+                pid = changes.get("project_id") or None
+                if pid:
+                    project_map = {p["id"]: p for p in data.get("projects", [])}
+                    if pid not in project_map:
+                        self._send_json(400, {"code": "invalid_request", "message": f"project {pid} not found"})
+                        return
+                task["project_id"] = pid
             if "status" in changes:
                 try:
                     _apply_status(task, str(changes.get("status")))
@@ -1620,8 +1704,10 @@ def _map_status_from_github(gh_status: str) -> str:
     return "TODO"
 
 
-def _build_issue_body(task: dict) -> str:
+def _build_issue_body(task: dict, projects: list[dict] = None) -> str:
     """Build Issue body from task data."""
+    projects = projects or []
+    project_map = {p["id"]: p["title"] for p in projects}
     parts = []
     if task.get("description"):
         parts.append(task["description"])
@@ -1634,8 +1720,9 @@ def _build_issue_body(task: dict) -> str:
         parts.append(f"**Due:** {task['due_date']}")
     if task.get("scheduled_date"):
         parts.append(f"**Scheduled:** {task['scheduled_date']}")
-    if task.get("parent_id"):
-        parts.append(f"**Parent:** {task['parent_id']}")
+    if task.get("project_id"):
+        ptitle = project_map.get(task["project_id"], task["project_id"])
+        parts.append(f"**Project:** {ptitle}")
     if task.get("dependencies"):
         parts.append(f"**Dependencies:** {', '.join(task['dependencies'])}")
     return "\n".join(parts)
@@ -1685,7 +1772,7 @@ def cmd_push(args) -> None:
         if t.get("github_issue_number"):
             # Update existing issue
             issue_num = t["github_issue_number"]
-            body = _build_issue_body(t)
+            body = _build_issue_body(t, data.get("projects", []))
             result = _gh([
                 "issue", "edit", str(issue_num),
                 "--repo", repo,
@@ -1706,7 +1793,7 @@ def cmd_push(args) -> None:
                 print(f"Failed to update #{issue_num}: {result.stderr}", file=sys.stderr)
         else:
             # Create new issue
-            body = _build_issue_body(t)
+            body = _build_issue_body(t, data.get("projects", []))
             labels = ",".join(t.get("tags", []))
             cmd = [
                 "issue", "create",
@@ -1915,7 +2002,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--tag", action="append", help="Tag (repeatable)")
     p_add.add_argument("--due", help="Due date (YYYY-MM-DD)")
     p_add.add_argument("--scheduled", help="Scheduled date (YYYY-MM-DD)")
-    p_add.add_argument("--parent", help="Parent task ID")
+    p_add.add_argument("--project", help="Project task ID")
     p_add.add_argument("--depends", action="append", help="Dependency task ID (repeatable)")
 
     # list
@@ -1953,21 +2040,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_pending.add_argument("task_id", help="Task ID")
 
     # link
-    p_link = sub.add_parser("link", help="Link tasks (parent/dependency)")
+    p_link = sub.add_parser("link", help="Link tasks (project/dependency)")
     p_link.add_argument("--from", dest="from_id", help="Dependency (upstream) task ID")
     p_link.add_argument("--to", dest="to_id", help="Dependent (downstream) task ID")
-    p_link.add_argument("--parent", help="Parent task ID")
-    p_link.add_argument("--child", help="Child task ID")
+    p_link.add_argument("--project", help="Project task ID")
+    p_link.add_argument("--task", help="Task ID to add to project")
 
     # unlink
     p_unlink = sub.add_parser("unlink", help="Unlink tasks")
     p_unlink.add_argument("--from", dest="from_id", help="Dependency (upstream) task ID")
     p_unlink.add_argument("--to", dest="to_id", help="Dependent (downstream) task ID")
-    p_unlink.add_argument("--parent", help="Parent task ID")
-    p_unlink.add_argument("--child", help="Child task ID")
+    p_unlink.add_argument("--project", help="Project task ID")
+    p_unlink.add_argument("--task", help="Task ID to remove from project")
 
     # archive
-    sub.add_parser("archive", help="Archive completed tasks")
+    p_archive = sub.add_parser("archive", help="Archive completed tasks")
+    p_archive.add_argument("--last-week", action="store_true", help="Archive only tasks completed last week (Mon-Fri)")
 
     # view
     sub.add_parser("view", help="Generate markdown views")

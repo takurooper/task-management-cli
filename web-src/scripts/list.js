@@ -9,6 +9,7 @@
   const payload = JSON.parse(dataNode.textContent || "{}");
   const tasks = (payload.tasks || []).map((t) => ({ ...t }));
   const taskMap = new Map(tasks.map((t) => [t.id, t]));
+  const projects = payload.projects || [];
   const activeStatuses = new Set(["TODO", "IN_PROGRESS", "PENDING", "DONE"]);
   let query = "";
   let draggingTaskId = null;
@@ -101,6 +102,7 @@
         row.addEventListener("click", () => {
           if (row._didDrag) { row._didDrag = false; return; }
           window.TaskPopup.open(t, {
+            projects,
             onUpdate(updated) { Object.assign(t, updated); render(); },
             onDelete() { const idx = tasks.indexOf(t); if (idx >= 0) tasks.splice(idx, 1); taskMap.delete(t.id); render(); },
           });

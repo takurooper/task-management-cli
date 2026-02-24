@@ -8,6 +8,7 @@
 
   const payload = JSON.parse(dataNode.textContent || "{}");
   const statuses = ["TODO", "IN_PROGRESS", "PENDING", "DONE"];
+  const projects = payload.projects || [];
   const columns = {};
   for (const s of statuses) {
     columns[s] = Array.isArray(payload.columns?.[s])
@@ -173,6 +174,7 @@
         card.addEventListener("click", () => {
           if (card._didDrag) { card._didDrag = false; return; }
           window.TaskPopup.open(t, {
+            projects,
             onUpdate(updated) { replaceTask(updated); render(); },
             onDelete(id) {
               for (const s of statuses) {

@@ -18,7 +18,7 @@ python task.py --help
 ```bash
 python task.py add "タスク名"
 python task.py add "タスク名" --tag dev --tag design --due 2026-03-01 --scheduled 2026-02-20
-python task.py add "子タスク" --parent t001 --depends t002
+python task.py add "タスク" --project t001 --depends t002
 ```
 
 ### タスク一覧・詳細
@@ -53,9 +53,9 @@ python task.py done t001     # → DONE（完了日を自動設定）
 
 ```bash
 python task.py link --from t001 --to t003        # 依存関係（t001完了後にt003着手）
-python task.py link --parent t001 --child t002   # 親子関係
+python task.py link --project t001 --task t002   # プロジェクトに追加
 python task.py unlink --from t001 --to t003      # 依存解除
-python task.py unlink --parent t001 --child t002 # 親子解除
+python task.py unlink --project t001 --task t002 # プロジェクトから除外
 ```
 
 ### アーカイブ
@@ -105,7 +105,7 @@ POST   /api/tasks
 PATCH  /api/tasks/:id
 DELETE /api/tasks/:id
 POST   /api/links/dependency
-POST   /api/links/parent
+POST   /api/links/project
 POST   /api/archive
 POST   /api/view/regenerate
 ```

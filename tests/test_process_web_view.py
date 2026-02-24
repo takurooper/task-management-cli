@@ -13,13 +13,14 @@ spec.loader.exec_module(mod)
 
 class ProcessWebViewTests(unittest.TestCase):
     def test_build_graph_model_filters_invalid_links(self):
+        projects = [{"id": "p001", "title": "Project A"}]
         tasks = [
             {
                 "id": "t001",
                 "title": "A",
                 "status": "TODO",
                 "updated_at": "2026-01-01T00:00:00Z",
-                "parent_id": None,
+                "project_id": "p001",
                 "dependencies": [],
                 "tags": [],
             },
@@ -28,17 +29,17 @@ class ProcessWebViewTests(unittest.TestCase):
                 "title": "B",
                 "status": "IN_PROGRESS",
                 "updated_at": "2026-01-01T00:00:01Z",
-                "parent_id": "t001",
+                "project_id": "p001",
                 "dependencies": ["t001", "missing", "t002"],
                 "tags": ["ui"],
             },
         ]
-        model = mod._build_process_graph_model(tasks)
+        model = mod._build_process_graph_model(tasks, projects)
 
         self.assertEqual(len(model["nodes"]), 2)
         self.assertEqual(len(model["edges"]), 1)
         self.assertEqual(model["edges"][0], {"from": "t001", "to": "t002", "type": "dependency"})
-        self.assertEqual(model["groups"][0]["id"], "t001")
+        self.assertEqual(model["groups"][0]["id"], "p001")
         self.assertEqual(model["groups"][0]["members"], ["t001", "t002"])
         self.assertEqual(model["nodes"][1]["updated_at"], "2026-01-01T00:00:01Z")
 
@@ -48,7 +49,7 @@ class ProcessWebViewTests(unittest.TestCase):
                 "id": "t001",
                 "title": "A",
                 "status": "TODO",
-                "parent_id": None,
+                "project_id": None,
                 "dependencies": [],
                 "tags": [],
             },
@@ -56,7 +57,7 @@ class ProcessWebViewTests(unittest.TestCase):
                 "id": "t002",
                 "title": "B",
                 "status": "TODO",
-                "parent_id": None,
+                "project_id": None,
                 "dependencies": ["t001"],
                 "tags": [],
             },
@@ -64,7 +65,7 @@ class ProcessWebViewTests(unittest.TestCase):
                 "id": "t003",
                 "title": "C",
                 "status": "PENDING",
-                "parent_id": None,
+                "project_id": None,
                 "dependencies": ["t002"],
                 "tags": [],
             },
@@ -85,14 +86,16 @@ class ProcessWebViewTests(unittest.TestCase):
                 self.assertFalse(overlap)
 
     def test_project_group_boxes_do_not_overlap_and_are_left_aligned(self):
-        tasks = [
-            {"id": "t001", "title": "P1", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []},
-            {"id": "t002", "title": "P2", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []},
-            {"id": "t003", "title": "A", "status": "TODO", "parent_id": "t001", "dependencies": [], "tags": []},
-            {"id": "t004", "title": "B", "status": "TODO", "parent_id": "t001", "dependencies": ["t003"], "tags": []},
-            {"id": "t005", "title": "C", "status": "TODO", "parent_id": "t002", "dependencies": [], "tags": []},
+        projects = [
+            {"id": "p001", "title": "P1"},
+            {"id": "p002", "title": "P2"},
         ]
-        model = mod._build_process_graph_model(tasks)
+        tasks = [
+            {"id": "t003", "title": "A", "status": "TODO", "project_id": "p001", "dependencies": [], "tags": []},
+            {"id": "t004", "title": "B", "status": "TODO", "project_id": "p001", "dependencies": ["t003"], "tags": []},
+            {"id": "t005", "title": "C", "status": "TODO", "project_id": "p002", "dependencies": [], "tags": []},
+        ]
+        model = mod._build_process_graph_model(tasks, projects)
         layout = mod._layout_process_graph(model)
         groups = layout["groups"]
 
@@ -106,21 +109,23 @@ class ProcessWebViewTests(unittest.TestCase):
                 self.assertFalse(overlap)
 
     def test_project_with_more_dependency_depth_gets_wider(self):
-        tasks = [
-            {"id": "t001", "title": "Wide", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []},
-            {"id": "t002", "title": "Narrow", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []},
-            {"id": "t003", "title": "W1", "status": "TODO", "parent_id": "t001", "dependencies": [], "tags": []},
-            {"id": "t004", "title": "W2", "status": "TODO", "parent_id": "t001", "dependencies": ["t003"], "tags": []},
-            {"id": "t005", "title": "W3", "status": "TODO", "parent_id": "t001", "dependencies": ["t004"], "tags": []},
-            {"id": "t006", "title": "N1", "status": "TODO", "parent_id": "t002", "dependencies": [], "tags": []},
+        projects = [
+            {"id": "p001", "title": "Wide"},
+            {"id": "p002", "title": "Narrow"},
         ]
-        model = mod._build_process_graph_model(tasks)
+        tasks = [
+            {"id": "t003", "title": "W1", "status": "TODO", "project_id": "p001", "dependencies": [], "tags": []},
+            {"id": "t004", "title": "W2", "status": "TODO", "project_id": "p001", "dependencies": ["t003"], "tags": []},
+            {"id": "t005", "title": "W3", "status": "TODO", "project_id": "p001", "dependencies": ["t004"], "tags": []},
+            {"id": "t006", "title": "N1", "status": "TODO", "project_id": "p002", "dependencies": [], "tags": []},
+        ]
+        model = mod._build_process_graph_model(tasks, projects)
         layout = mod._layout_process_graph(model)
         groups = {g["id"]: g for g in layout["groups"]}
 
-        self.assertIn("t001", groups)
-        self.assertIn("t002", groups)
-        self.assertGreater(groups["t001"]["w"], groups["t002"]["w"])
+        self.assertIn("p001", groups)
+        self.assertIn("p002", groups)
+        self.assertGreater(groups["p001"]["w"], groups["p002"]["w"])
 
     def test_list_and_kanban_payload_shape(self):
         tasks = [
@@ -128,7 +133,7 @@ class ProcessWebViewTests(unittest.TestCase):
                 "id": "t001",
                 "title": "A",
                 "status": "TODO",
-                "parent_id": None,
+                "project_id": None,
                 "dependencies": [],
                 "tags": ["core"],
                 "due_date": None,
@@ -141,7 +146,7 @@ class ProcessWebViewTests(unittest.TestCase):
                 "id": "t002",
                 "title": "B",
                 "status": "IN_PROGRESS",
-                "parent_id": None,
+                "project_id": None,
                 "dependencies": ["t001"],
                 "tags": [],
                 "due_date": "2026-03-01",
@@ -163,20 +168,24 @@ class ProcessWebViewTests(unittest.TestCase):
 
     def test_process_payload_includes_layout_mode(self):
         tasks = [
-            {"id": "t001", "title": "A", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []}
+            {"id": "t001", "title": "A", "status": "TODO", "project_id": None, "dependencies": [], "tags": []}
         ]
         payload = mod._build_process_web_payload(tasks)
         self.assertEqual(payload["meta"]["layout_mode"], "project_rows")
 
-    def test_process_payload_excludes_parent_nodes(self):
+    def test_process_payload_groups_by_project(self):
+        projects = [{"id": "p001", "title": "Project"}]
         tasks = [
-            {"id": "t001", "title": "Parent", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []},
-            {"id": "t002", "title": "Child", "status": "TODO", "parent_id": "t001", "dependencies": [], "tags": []},
+            {"id": "t001", "title": "Task A", "status": "TODO", "project_id": "p001", "dependencies": [], "tags": []},
+            {"id": "t002", "title": "Task B", "status": "TODO", "project_id": None, "dependencies": [], "tags": []},
         ]
-        payload = mod._build_process_web_payload(tasks)
+        payload = mod._build_process_web_payload(tasks, projects)
         ids = [n["id"] for n in payload["nodes"]]
-        self.assertNotIn("t001", ids)
+        self.assertIn("t001", ids)
         self.assertIn("t002", ids)
+        self.assertEqual(len(payload["groups"]), 1)
+        self.assertEqual(payload["groups"][0]["id"], "p001")
+        self.assertEqual(payload["groups"][0]["title"], "Project")
 
     def test_check_expected_updated_at(self):
         task = {"id": "t001", "updated_at": "2026-01-01T00:00:00Z"}
@@ -187,18 +196,6 @@ class ProcessWebViewTests(unittest.TestCase):
         ok, err = mod._check_expected_updated_at(task, "2026-01-01T00:00:01Z")
         self.assertFalse(ok)
         self.assertEqual(err["code"], "conflict")
-
-    def test_exclude_parent_tasks_for_list_kanban(self):
-        tasks = [
-            {"id": "t001", "title": "Parent", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []},
-            {"id": "t002", "title": "Child", "status": "TODO", "parent_id": "t001", "dependencies": [], "tags": []},
-            {"id": "t003", "title": "Leaf", "status": "TODO", "parent_id": None, "dependencies": [], "tags": []},
-        ]
-        filtered = mod._exclude_parent_tasks(tasks)
-        ids = [t["id"] for t in filtered]
-        self.assertNotIn("t001", ids)
-        self.assertIn("t002", ids)
-        self.assertIn("t003", ids)
 
 
 if __name__ == "__main__":

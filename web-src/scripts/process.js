@@ -10,6 +10,7 @@
 
   if (!dataNode || !svg) return;
   const graph = JSON.parse(dataNode.textContent || "{}");
+  const projects = graph.projects || [];
 
   const STATUS_CLASS = {
     TODO: "todo",
@@ -91,7 +92,7 @@
   function renderGroups() {
     for (const g of graph.groups || []) {
       const group = document.createElementNS(ns, "g");
-      group.setAttribute("class", `group ${STATUS_CLASS[g.status] || "todo"}`);
+      group.setAttribute("class", "group todo");
       group.dataset.groupId = g.id;
 
       const box = document.createElementNS(ns, "rect");
@@ -232,7 +233,7 @@
 
     groupLayer.querySelectorAll("g.group").forEach((g) => {
       const gid = g.dataset.groupId;
-      const hasVisible = (graph.nodes || []).some((n) => (n.parent_id === gid || n.id === gid) && visibleNodes.has(n.id));
+      const hasVisible = (graph.nodes || []).some((n) => n.project_id === gid && visibleNodes.has(n.id));
       g.style.display = hasVisible ? "" : "none";
     });
   }
@@ -383,6 +384,7 @@
       event.stopPropagation();
       event.preventDefault();
       window.TaskPopup.open(node, {
+        projects,
         onUpdate(updated) {
           Object.assign(node, updated);
           const el = nodeEls.get(node.id);
