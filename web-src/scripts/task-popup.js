@@ -104,11 +104,14 @@
     const status = get("status");
     if (status && status !== currentTask.status) changes.status = status;
 
+    const projectEl = overlay.querySelector('[name="project_id"]');
     const projectId = get("project_id");
     if (projectId !== undefined) {
       const newPid = projectId || null;
       const oldPid = currentTask.project_id || null;
-      if (newPid !== oldPid) changes.project_id = newPid;
+      const hasOldOption = !oldPid || Array.from(projectEl?.options || []).some((o) => o.value === oldPid);
+      // Guard against accidental unlink when project options are missing and select falls back to "(none)".
+      if (newPid !== oldPid && (newPid !== null || hasOldOption)) changes.project_id = newPid;
     }
 
     const scheduled = get("scheduled_date");

@@ -123,7 +123,7 @@ export function ListView({ data, projects, onDataChanged }) {
       </section>
 
       {popupTask && (
-        <TaskPopup task={popupTask} projects={projects}
+        <TaskPopup key={popupTask.id} task={popupTask} projects={projects}
           onUpdate={(updated) => { replaceTask(updated); onDataChanged?.(); }}
           onDelete={(id) => { removeTask(id); onDataChanged?.(); }}
           onClose={() => setPopupTask(null)} />

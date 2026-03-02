@@ -669,7 +669,7 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
       </footer>
 
       {popupTask && (
-        <TaskPopup task={popupTask} projects={projects}
+        <TaskPopup key={popupTask.id} task={popupTask} projects={projects}
           onUpdate={handlePopupUpdate}
           onDelete={handlePopupDelete}
           onClose={() => setPopupTask(null)} />

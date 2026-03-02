@@ -9,13 +9,26 @@ export function TaskPopup({ task, projects, onUpdate, onDelete, onClose }) {
 
   const [notice, setNotice] = useState({ text: "", kind: "" });
   const titleRef = useRef(null);
+  const formRef = useRef(null);
 
   useEffect(() => {
+    const form = formRef.current;
+    const set = (name, value) => {
+      const el = form?.elements?.[name];
+      if (el) el.value = value ?? "";
+    };
+    set("title", task.title || "");
+    set("status", task.status || "TODO");
+    set("project_id", task.project_id || "");
+    set("scheduled_date", task.scheduled_date || "");
+    set("due_date", task.due_date || "");
+    set("tags", (task.tags || []).join(", "));
+    set("description", task.description || "");
     if (titleRef.current) titleRef.current.focus();
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [task.id]);
+  }, [task.id, task.updated_at]);
 
   const handleOverlayClick = useCallback((e) => {
     if (e.target === e.currentTarget) onClose();
@@ -31,8 +44,12 @@ export function TaskPopup({ task, projects, onUpdate, onDelete, onClose }) {
     if (title !== (task.title || "")) changes.title = title;
     const status = get("status");
     if (status && status !== task.status) changes.status = status;
+    const projectEl = form.elements["project_id"];
     const projectId = get("project_id") || null;
-    if (projectId !== (task.project_id || null)) changes.project_id = projectId;
+    const oldProjectId = task.project_id || null;
+    const hasOldOption = !oldProjectId || Array.from(projectEl?.options || []).some((o) => o.value === oldProjectId);
+    // Guard against accidental unlink when project options are missing and select falls back to "(none)".
+    if (projectId !== oldProjectId && (projectId !== null || hasOldOption)) changes.project_id = projectId;
     const scheduled = get("scheduled_date");
     if (scheduled !== (task.scheduled_date || "")) changes.scheduled_date = scheduled || null;
     const due = get("due_date");
@@ -80,7 +97,7 @@ export function TaskPopup({ task, projects, onUpdate, onDelete, onClose }) {
 
   return (
     <div class="tp-overlay" onClick={handleOverlayClick}>
-      <form class="tp-panel" role="dialog" aria-label="Task detail" onSubmit={handleSave}>
+      <form class="tp-panel" role="dialog" aria-label="Task detail" onSubmit={handleSave} ref={formRef}>
         <header class="tp-header">
           <span class="tp-id">{task.id}</span>
           <button class="tp-close" type="button" aria-label="Close" onClick={onClose}>&times;</button>
