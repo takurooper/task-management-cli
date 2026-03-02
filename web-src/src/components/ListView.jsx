@@ -1,5 +1,5 @@
 import { h } from "preact";
-import { useState, useMemo, useCallback, useRef } from "preact/hooks";
+import { useState, useMemo, useCallback, useRef, useEffect } from "preact/hooks";
 import * as api from "../api/client";
 import { TaskPopup } from "./TaskPopup";
 
@@ -26,6 +26,10 @@ export function ListView({ data, projects, onDataChanged }) {
   const [popupTask, setPopupTask] = useState(null);
   const draggingRef = useRef(null);
   const timerRef = useRef(null);
+
+  useEffect(() => {
+    setTasks((data.tasks || []).map((t) => ({ ...t })));
+  }, [data.tasks]);
 
   const replaceTask = useCallback((updated) => {
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? { ...updated } : t)));

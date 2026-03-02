@@ -445,6 +445,33 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
       if (nd) { nd.x = pos.x; nd.y = pos.y; nd.w = pos.w; nd.h = pos.h; }
     }
 
+    function applyNodeUpdate(updated) {
+      const node = nodeData.get(updated.id);
+      if (!node) return;
+      Object.assign(node, updated);
+      const el = nodeEls.get(updated.id);
+      if (!el) return;
+      const status = node.status || "TODO";
+      el.setAttribute("class", `node ${STATUS_CLASS[status] || "todo"}`);
+      el.dataset.status = status;
+      el.dataset.title = String(node.title || "").toLowerCase();
+      const titleText = el.querySelector(".node-title");
+      if (titleText) {
+        titleText.innerHTML = "";
+        wrapText(String(node.title || ""), 18, 3).forEach((line, i) => {
+          const tspan = document.createElementNS(ns, "tspan");
+          tspan.setAttribute("x", `${node.x + 14}`);
+          tspan.setAttribute("dy", i === 0 ? "0" : "15");
+          tspan.textContent = line;
+          titleText.appendChild(tspan);
+        });
+      }
+      const statusText = el.querySelector(".node-status");
+      if (statusText) {
+        statusText.textContent = status;
+      }
+    }
+
     function applyFilters() {
       const currentQuery = graphStateRef.current?.query ?? "";
       const currentStatuses = graphStateRef.current?.activeStatuses ?? new Set(STATUSES);
@@ -568,7 +595,7 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
     window.addEventListener("mouseup", onMouseUp);
 
     // Store refs for filter sync and fit
-    graphStateRef.current = { applyFilters, fitToGraph, nodeData, activeStatuses, query };
+    graphStateRef.current = { applyFilters, fitToGraph, nodeData, nodeEls, renderEdges, applyNodeUpdate, activeStatuses, query };
     applyFilters();
 
     return () => {
@@ -620,17 +647,31 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
   const handlePopupUpdate = useCallback((updated) => {
     const gs = graphStateRef.current;
     if (gs) {
-      const node = gs.nodeData.get(updated.id);
-      if (node) Object.assign(node, updated);
+      gs.applyNodeUpdate?.(updated);
+      gs.applyFilters?.();
     }
     setPopupTask(null);
     onDataChanged?.();
   }, [onDataChanged]);
 
   const handlePopupDelete = useCallback((id) => {
+    const gs = graphStateRef.current;
+    if (gs) {
+      const el = gs.nodeEls?.get(id);
+      if (el) {
+        el.remove();
+        gs.nodeEls.delete(id);
+      }
+      if (Array.isArray(graph.edges)) {
+        graph.edges = graph.edges.filter((e) => e.from !== id && e.to !== id);
+      }
+      gs.nodeData?.delete(id);
+      gs.renderEdges?.();
+      gs.applyFilters?.();
+    }
     setPopupTask(null);
     onDataChanged?.();
-  }, [onDataChanged]);
+  }, [graph, onDataChanged]);
 
   return (
     <div>

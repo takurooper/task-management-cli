@@ -1,5 +1,5 @@
 import { h } from "preact";
-import { useState, useMemo, useCallback, useRef } from "preact/hooks";
+import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import * as api from "../api/client";
 import { TaskPopup } from "./TaskPopup";
 
@@ -27,7 +27,13 @@ export function KanbanView({ data, projects, onDataChanged }) {
   const draggingRef = useRef(null);
   const timerRef = useRef(null);
 
-  const allTasks = useMemo(() => STATUSES.flatMap((s) => columns[s]), [columns]);
+  useEffect(() => {
+    const next = {};
+    for (const s of STATUSES) {
+      next[s] = Array.isArray(data.columns?.[s]) ? data.columns[s].map((t) => ({ ...t })) : [];
+    }
+    setColumns(next);
+  }, [data.columns]);
 
   const findTask = useCallback((taskId) => {
     for (const s of STATUSES) {
@@ -37,12 +43,14 @@ export function KanbanView({ data, projects, onDataChanged }) {
     return null;
   }, [columns]);
 
-  const replaceTask = useCallback((updated) => {
+  const upsertTask = useCallback((updated) => {
     setColumns((prev) => {
       const next = {};
       for (const s of STATUSES) {
-        next[s] = prev[s].map((t) => (t.id === updated.id ? { ...updated } : t));
+        next[s] = prev[s].filter((t) => t.id !== updated.id);
       }
+      const status = STATUSES.includes(updated.status) ? updated.status : "TODO";
+      next[status] = [...next[status], { ...updated }];
       return next;
     });
   }, []);
@@ -78,10 +86,10 @@ export function KanbanView({ data, projects, onDataChanged }) {
     setNotice({ text: `Updating ${taskId} → ${targetStatus} ...`, kind: "info" });
 
     try {
-      const res = await api.updateTask(taskId, expectedUpdatedAt, { status: targetStatus });
-      replaceTask(res.task);
-      setNotice({ text: "", kind: "" });
-      onDataChanged?.();
+       const res = await api.updateTask(taskId, expectedUpdatedAt, { status: targetStatus });
+       upsertTask(res.task);
+       setNotice({ text: "", kind: "" });
+       onDataChanged?.();
     } catch (err) {
       // Rollback
       setColumns((prev) => {
@@ -96,13 +104,13 @@ export function KanbanView({ data, projects, onDataChanged }) {
         return next;
       });
       if (err?.status === 409 && err?.payload?.latest) {
-        replaceTask(err.payload.latest);
+        upsertTask(err.payload.latest);
         setNotice({ text: `Conflict on ${taskId}. latest state was applied.`, kind: "warn" });
       } else {
         setNotice({ text: `Failed to update ${taskId}: ${err?.message || "unknown"}`, kind: "error" });
       }
     }
-  }, [findTask, replaceTask, onDataChanged]);
+  }, [findTask, upsertTask, onDataChanged]);
 
   const matches = useCallback((task) => {
     if (!query) return true;
@@ -142,7 +150,7 @@ export function KanbanView({ data, projects, onDataChanged }) {
 
       {popupTask && (
         <TaskPopup key={popupTask.id} task={popupTask} projects={projects}
-          onUpdate={(updated) => { replaceTask(updated); onDataChanged?.(); }}
+          onUpdate={(updated) => { upsertTask(updated); onDataChanged?.(); }}
           onDelete={(id) => { removeTask(id); onDataChanged?.(); }}
           onClose={() => setPopupTask(null)} />
       )}

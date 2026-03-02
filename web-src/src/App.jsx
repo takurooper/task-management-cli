@@ -27,19 +27,32 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const dataStaleRef = useRef(false);
+  const loadInFlightRef = useRef(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.getViewsData();
-      setViewsData(data);
-      dataStaleRef.current = false;
-    } catch (err) {
-      setError(err?.message || "Failed to load data");
-    } finally {
-      setLoading(false);
+  const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (loadInFlightRef.current) {
+      return loadInFlightRef.current;
     }
+    const promise = (async () => {
+      if (!silent) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const data = await api.getViewsData();
+        setViewsData(data);
+        dataStaleRef.current = false;
+      } catch (err) {
+        setError(err?.message || "Failed to load data");
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+        loadInFlightRef.current = null;
+      }
+    })();
+    loadInFlightRef.current = promise;
+    return promise;
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -55,7 +68,8 @@ export function App() {
 
   const handleDataChanged = useCallback(() => {
     dataStaleRef.current = true;
-  }, []);
+    void loadData({ silent: true });
+  }, [loadData]);
 
   const handleRefresh = useCallback(() => { loadData(); }, [loadData]);
 
