@@ -245,8 +245,21 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
     function edgePath(from, to) {
       const sx = from.x + from.w, sy = from.y + from.h / 2;
       const ex = to.x, ey = to.y + to.h / 2;
-      const curve = Math.max(36, (ex - sx) * 0.4);
-      return `M ${sx} ${sy} C ${sx + curve} ${sy}, ${ex - curve} ${ey}, ${ex} ${ey}`;
+
+      // ターゲットが右側にある通常ケース: 水平ベジエ曲線
+      if (ex >= sx) {
+        const curve = Math.max(36, (ex - sx) * 0.4);
+        return `M ${sx} ${sy} C ${sx + curve} ${sy}, ${ex - curve} ${ey}, ${ex} ${ey}`;
+      }
+
+      // ターゲットが左側にある逆行ケース:
+      // ソースの下辺中央 → ターゲットの上辺中央 へ垂直方向でルーティング
+      const fromBx = from.x + from.w / 2;
+      const fromBy = from.y + from.h;
+      const toBx = to.x + to.w / 2;
+      const toBy = to.y;
+      const dy = Math.max(44, Math.abs(toBy - fromBy) * 0.45);
+      return `M ${fromBx} ${fromBy} C ${fromBx} ${fromBy + dy}, ${toBx} ${toBy - dy}, ${toBx} ${toBy}`;
     }
 
     function renderEdges() {
@@ -519,17 +532,49 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
         edgeEls.push({ from: edge.from, to: edge.to, el: path });
       }
 
-      // Auto-fit viewBox to new canvas
-      state.viewBox.x = result.canvas.x;
-      state.viewBox.y = result.canvas.y;
-      state.viewBox.w = Math.max(1, result.canvas.width);
-      state.viewBox.h = Math.max(1, result.canvas.height);
+      // 計算済み canvas を保存しておき Fit ボタンから再利用できるようにする
+      if (graphStateRef.current) graphStateRef.current.lastCanvas = result.canvas;
+
+      // キャンバス全体が SVG ピクセル領域に収まるよう viewBox を再計算して適用する
+      fitCanvasToView(result.canvas);
+    }
+
+    // SVG のピクセルサイズに合わせて canvas 全体が収まる viewBox を計算・適用する。
+    // preserveAspectRatio の "meet" 相当を手動で計算し、余白を加えてセンタリングする。
+    function fitCanvasToView(canvas) {
+      const pad = 32; // SVG 座標系での余白
+      const contentW = canvas.width + pad * 2;
+      const contentH = canvas.height + pad * 2;
+      const rect = svg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return; // SVG 未レイアウト時はスキップ
+
+      const svgAspect = rect.width / rect.height;
+      const contentAspect = contentW / contentH;
+
+      let vbW, vbH;
+      if (contentAspect > svgAspect) {
+        // 横方向が制限：viewBox 幅を contentW に合わせ、高さを SVG アスペクト比で補完
+        vbW = contentW;
+        vbH = contentW / svgAspect;
+      } else {
+        // 縦方向が制限：viewBox 高さを contentH に合わせ、幅を SVG アスペクト比で補完
+        vbH = contentH;
+        vbW = contentH * svgAspect;
+      }
+
+      // canvas をセンタリングして余白を均等に分配
+      state.viewBox.x = (canvas.x - pad) - (vbW - contentW) / 2;
+      state.viewBox.y = (canvas.y - pad) - (vbH - contentH) / 2;
+      state.viewBox.w = Math.max(1, vbW);
+      state.viewBox.h = Math.max(1, vbH);
       syncViewBox();
     }
 
     function fitToGraph() {
-      // Re-run applyFilters which recalculates layout and fits
-      applyFilters();
+      // 最後に計算した canvas を使って再フィット
+      const gs = graphStateRef.current;
+      if (gs?.lastCanvas) fitCanvasToView(gs.lastCanvas);
+      else applyFilters();
     }
 
     // SVG event handlers
@@ -595,10 +640,19 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
     window.addEventListener("mouseup", onMouseUp);
 
     // Store refs for filter sync and fit
-    graphStateRef.current = { applyFilters, fitToGraph, nodeData, nodeEls, renderEdges, applyNodeUpdate, activeStatuses, query };
+    graphStateRef.current = { applyFilters, fitToGraph, nodeData, nodeEls, renderEdges, applyNodeUpdate, activeStatuses, query, lastCanvas: null };
+
+    // 初回はノードをレイアウトしてから rAF で fit を実行する。
+    // useEffect 内では SVG がまだブラウザにレイアウトされておらず getBoundingClientRect() が
+    // 0 を返す場合があるため、1 フレーム後に fitCanvasToView を再実行する。
     applyFilters();
+    const rafId = requestAnimationFrame(() => {
+      const gs = graphStateRef.current;
+      if (gs?.lastCanvas) fitCanvasToView(gs.lastCanvas);
+    });
 
     return () => {
+      cancelAnimationFrame(rafId);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
       svg.innerHTML = "";
@@ -699,7 +753,7 @@ export function ProcessView({ data: graph, projects, onDataChanged }) {
       <section class="notice" aria-live="polite" data-kind={notice.kind}>{notice.text}</section>
 
       <section class="canvas-wrap" ref={canvasWrapRef}>
-        <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Task process graph" />
+        <svg id="graphSvg" ref={svgRef} xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Task process graph" />
       </section>
 
       <footer class="legend" aria-label="Legend">
